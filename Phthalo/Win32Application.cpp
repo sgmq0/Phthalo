@@ -8,6 +8,11 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 	const int width = 800;
 	const int height = 800;
 
+	int argc;
+	LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+	pSample->ParseCommandLineArgs(argv, argc);
+	LocalFree(argv);
+
 	// simple window class
 	WNDCLASS wc = {};
 	wc.lpfnWndProc = WindowProc;
@@ -15,20 +20,25 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 	wc.lpszClassName = L"DirectX12Triangle";
 	RegisterClass(&wc);
 
-	HWND hwnd = CreateWindow(
+	RECT windowRect = { 0, 0, static_cast<LONG>(pSample->GetWidth()), static_cast<LONG>(pSample->GetHeight()) };
+	AdjustWindowRect(&windowRect, WS_OVERLAPPEDWINDOW, FALSE);
+
+	m_hwnd = CreateWindow(
 		wc.lpszClassName, 
 		L"DirectX 12 Triangle", 
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT, 
 		CW_USEDEFAULT, 
-		width, 
-		height, 
+		windowRect.right - windowRect.left,
+		windowRect.bottom - windowRect.top,
 		nullptr, 
-		nullptr, 
+		nullptr,
 		hInstance, 
-		nullptr);
+		pSample);
 
-	ShowWindow(hwnd, nCmdShow);
+	pSample->OnInit();
+
+	ShowWindow(m_hwnd, nCmdShow);
 
 	MSG msg = {};
 	while (msg.message != WM_QUIT)
@@ -41,18 +51,52 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 		}
 	}
 
+	pSample->OnDestroy();
+
 	return 1;
 
 }
 
 LRESULT Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	switch (message) {
-	case WM_DESTROY:
+	DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+
+	switch (message)
 	{
+	case WM_CREATE:
+	{
+		// Save the DXSample* passed in to CreateWindow.
+		LPCREATESTRUCT pCreateStruct = reinterpret_cast<LPCREATESTRUCT>(lParam);
+		SetWindowLongPtr(hWnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pCreateStruct->lpCreateParams));
+	}
+	return 0;
+
+	case WM_KEYDOWN:
+		if (pSample)
+		{
+			pSample->OnKeyDown(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_KEYUP:
+		if (pSample)
+		{
+			pSample->OnKeyUp(static_cast<UINT8>(wParam));
+		}
+		return 0;
+
+	case WM_PAINT:
+		if (pSample)
+		{
+			pSample->OnUpdate();
+			pSample->OnRender();
+		}
+		return 0;
+
+	case WM_DESTROY:
 		PostQuitMessage(0);
 		return 0;
 	}
-	}
+
 	return DefWindowProc(hWnd, message, wParam, lParam);
 }
