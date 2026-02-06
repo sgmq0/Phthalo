@@ -14,6 +14,11 @@
 
 using namespace Microsoft::WRL;
 
+/*
+this class contains a bunch of helper functions and 
+member variables for different DX12 applications.
+*/
+
 DXSample::DXSample(UINT width, UINT height, std::wstring name) :
     m_width(width),
     m_height(height),

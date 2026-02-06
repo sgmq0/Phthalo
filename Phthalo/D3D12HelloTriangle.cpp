@@ -12,9 +12,6 @@
 #include "stdafx.h"
 #include "D3D12HelloTriangle.h"
 
-//extern "C" { __declspec(dllexport) extern const UINT D3D12SDKVersion = 618; }
-//extern "C" { __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\"; }
-
 D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring name) :
     DXSample(width, height, name),
     m_frameIndex(0),
@@ -33,6 +30,8 @@ void D3D12HelloTriangle::OnInit()
 // Load the rendering pipeline dependencies.
 void D3D12HelloTriangle::LoadPipeline()
 {
+    // this function loads all the rendering pipeline dependencies
+
     UINT dxgiFactoryFlags = 0;
 
 #if defined(_DEBUG)
@@ -53,6 +52,8 @@ void D3D12HelloTriangle::LoadPipeline()
     ComPtr<IDXGIFactory4> factory;
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
+    // creates the device and stores to m_device
+    // depends on whether we use a warp device or not.
     if (m_useWarpDevice)
     {
         ComPtr<IDXGIAdapter> warpAdapter;
