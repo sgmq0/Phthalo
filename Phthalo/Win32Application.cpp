@@ -3,7 +3,7 @@
 
 HWND Win32Application::m_hwnd = nullptr;
 
-int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
+int Win32Application::Run(DXApplication* pSample, HINSTANCE hInstance, int nCmdShow)
 {
 	const int width = 800;
 	const int height = 800;
@@ -17,7 +17,7 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 	WNDCLASS wc = {};
 	wc.lpfnWndProc = WindowProc;
 	wc.hInstance = hInstance;
-	wc.lpszClassName = L"DirectX12Triangle";
+	wc.lpszClassName = L"DX12Application";
 	RegisterClass(&wc);
 
 	RECT windowRect = { 0, 0, static_cast<LONG>(pSample->GetWidth()), static_cast<LONG>(pSample->GetHeight()) };
@@ -25,7 +25,7 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 
 	m_hwnd = CreateWindow(
 		wc.lpszClassName, 
-		L"DirectX 12 Triangle", 
+		L"DirectX 12 Application", 
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT, 
 		CW_USEDEFAULT, 
@@ -59,7 +59,7 @@ int Win32Application::Run(DXSample* pSample, HINSTANCE hInstance, int nCmdShow)
 
 LRESULT Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
-	DXSample* pSample = reinterpret_cast<DXSample*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
+	DXApplication* pSample = reinterpret_cast<DXApplication*>(GetWindowLongPtr(hWnd, GWLP_USERDATA));
 
 	switch (message)
 	{

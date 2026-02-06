@@ -1,12 +1,12 @@
 #pragma once
 
-#include "DXSample.h"
+#include "DXApplication.h"
 
 using namespace DirectX;
 
 using Microsoft::WRL::ComPtr;
 
-class D3D12Renderer : public DXSample {
+class D3D12Renderer : public DXApplication {
 public:
 	D3D12Renderer(UINT width, UINT height);
 

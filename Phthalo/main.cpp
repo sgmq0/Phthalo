@@ -1,6 +1,5 @@
 #include "stdafx.h"
 
-#include "D3D12HelloTriangle.h"
 #include "D3D12Renderer.h"
 
 _Use_decl_annotations_

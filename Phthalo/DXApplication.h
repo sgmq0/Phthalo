@@ -3,11 +3,11 @@
 #include "DXSampleHelper.h"
 #include "Win32Application.h"
 
-class DXSample
+class DXApplication
 {
 public:
-    DXSample(UINT width, UINT height, std::wstring name);
-    virtual ~DXSample();
+    DXApplication(UINT width, UINT height, std::wstring name);
+    virtual ~DXApplication();
 
     virtual void OnInit() = 0;
     virtual void OnUpdate() = 0;

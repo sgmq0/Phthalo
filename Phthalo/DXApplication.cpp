@@ -10,7 +10,7 @@
 //*********************************************************
 
 #include "stdafx.h"
-#include "DXSample.h"
+#include "DXApplication.h"
 
 using namespace Microsoft::WRL;
 
@@ -19,7 +19,7 @@ this class contains a bunch of helper functions and
 member variables for different DX12 applications.
 */
 
-DXSample::DXSample(UINT width, UINT height, std::wstring name) :
+DXApplication::DXApplication(UINT width, UINT height, std::wstring name) :
     m_width(width),
     m_height(height),
     m_title(name),
@@ -32,12 +32,12 @@ DXSample::DXSample(UINT width, UINT height, std::wstring name) :
     m_aspectRatio = static_cast<float>(width) / static_cast<float>(height);
 }
 
-DXSample::~DXSample()
+DXApplication::~DXApplication()
 {
 }
 
 // Helper function for resolving the full path of assets.
-std::wstring DXSample::GetAssetFullPath(LPCWSTR assetName)
+std::wstring DXApplication::GetAssetFullPath(LPCWSTR assetName)
 {
     return m_assetsPath + assetName;
 }
@@ -45,7 +45,7 @@ std::wstring DXSample::GetAssetFullPath(LPCWSTR assetName)
 // Helper function for acquiring the first available hardware adapter that supports Direct3D 12.
 // If no such adapter can be found, *ppAdapter will be set to nullptr.
 _Use_decl_annotations_
-void DXSample::GetHardwareAdapter(
+void DXApplication::GetHardwareAdapter(
     IDXGIFactory1* pFactory,
     IDXGIAdapter1** ppAdapter,
     bool requestHighPerformanceAdapter)
@@ -111,7 +111,7 @@ void DXSample::GetHardwareAdapter(
 }
 
 // Helper function for setting the window's title text.
-void DXSample::SetCustomWindowText(LPCWSTR text)
+void DXApplication::SetCustomWindowText(LPCWSTR text)
 {
     std::wstring windowText = m_title + L": " + text;
     SetWindowText(Win32Application::GetHwnd(), windowText.c_str());
@@ -119,7 +119,7 @@ void DXSample::SetCustomWindowText(LPCWSTR text)
 
 // Helper function for parsing any supplied command line args.
 _Use_decl_annotations_
-void DXSample::ParseCommandLineArgs(WCHAR* argv[], int argc)
+void DXApplication::ParseCommandLineArgs(WCHAR* argv[], int argc)
 {
     for (int i = 1; i < argc; ++i)
     {

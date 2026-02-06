@@ -129,16 +129,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="D3D12HelloTriangle.cpp" />
     <ClCompile Include="D3D12Renderer.cpp" />
-    <ClCompile Include="DXSample.cpp" />
+    <ClCompile Include="DXApplication.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Win32Application.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="D3D12HelloTriangle.h" />
     <ClInclude Include="D3D12Renderer.h" />
-    <ClInclude Include="DXSample.h" />
+    <ClInclude Include="DXApplication.h" />
     <ClInclude Include="DXSampleHelper.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="Win32Application.h" />
