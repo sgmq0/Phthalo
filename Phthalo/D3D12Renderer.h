@@ -66,6 +66,9 @@ private:
     ComPtr<ID3D12Resource> m_vertexBuffer;          // buffer holding vertex data
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;    // describes the vertex buffer layout for the gpu.
 
+    ComPtr<ID3D12Resource> m_indexBuffer;           // ditto, for index buffer
+    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+
     // ----- Synchronization objects. -----
     UINT m_frameIndex;              // tracks the currently used frame buffer (0 or 1)
                                     // and uses it to index into m_renderTargets.
