@@ -49,27 +49,16 @@ void D3D12HelloTriangle::LoadPipeline()
     }
 #endif
 
-    ComPtr<IDXGIFactory4> factory;
+    ComPtr<IDXGIFactory6> factory;
     ThrowIfFailed(CreateDXGIFactory2(dxgiFactoryFlags, IID_PPV_ARGS(&factory)));
 
     // creates the device and stores to m_device
     // depends on whether we use a warp device or not.
-    if (m_useWarpDevice)
-    {
-        ComPtr<IDXGIAdapter> warpAdapter;
-        ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&warpAdapter)));
 
-        ThrowIfFailed(D3D12CreateDevice(
-            warpAdapter.Get(),
-            D3D_FEATURE_LEVEL_11_0,
-            IID_PPV_ARGS(&m_device)
-        ));
-    }
-    else
     {
         ComPtr<IDXGIAdapter1> hardwareAdapter;
         GetHardwareAdapter(factory.Get(), &hardwareAdapter);
-
+        
         ThrowIfFailed(D3D12CreateDevice(
             hardwareAdapter.Get(),
             D3D_FEATURE_LEVEL_11_0,
@@ -83,6 +72,7 @@ void D3D12HelloTriangle::LoadPipeline()
     queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
     ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+    ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 
     // Describe and create the swap chain.
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -134,8 +124,6 @@ void D3D12HelloTriangle::LoadPipeline()
             rtvHandle.Offset(1, m_rtvDescriptorSize);
         }
     }
-
-    ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 }
 
 // Load the sample assets.
@@ -204,9 +192,10 @@ void D3D12HelloTriangle::LoadAssets()
         // Define the geometry for a triangle.
         Vertex triangleVertices[] =
         {
-            { { 0.0f, 0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },
-            { { 0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },
-            { { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } }
+            { { -0.25f,  0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },  // 0: Top-left (red)
+            { {  0.25f,  0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 1: Top-right (green)
+            { { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } },  // 2: Bottom-left (blue)
+            { {  0.25f, -0.25f * m_aspectRatio, 0.0f }, { 1.0f, 1.0f, 0.0f, 1.0f } }   // 3: Bottom-right (yellow)
         };
 
         const UINT vertexBufferSize = sizeof(triangleVertices);
@@ -238,6 +227,39 @@ void D3D12HelloTriangle::LoadAssets()
         m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
         m_vertexBufferView.StrideInBytes = sizeof(Vertex);
         m_vertexBufferView.SizeInBytes = vertexBufferSize;
+    }
+
+    // create the index buffer.
+    {
+        UINT32 indices[] =
+        {
+            0, 1, 2,
+            1, 3, 2
+        };
+
+        const UINT indexBufferSize = sizeof(indices);
+
+        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &heapProps,
+            D3D12_HEAP_FLAG_NONE,
+            &bufferDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr,
+            IID_PPV_ARGS(&m_indexBuffer)));
+
+        // Copy the index data to the index buffer.
+        UINT8* pIndexDataBegin;
+        CD3DX12_RANGE readRange(0, 0);
+        ThrowIfFailed(m_indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
+        memcpy(pIndexDataBegin, indices, sizeof(indices));
+        m_indexBuffer->Unmap(0, nullptr);
+
+        // Initialize the index buffer view.
+        m_indexBufferView.BufferLocation = m_indexBuffer->GetGPUVirtualAddress();
+        m_indexBufferView.Format = DXGI_FORMAT_R32_UINT;  // 32-bit indices, for lots of verts
+        m_indexBufferView.SizeInBytes = indexBufferSize;
     }
 
     // Create synchronization objects and wait until assets have been uploaded to the GPU.
@@ -321,8 +343,15 @@ void D3D12HelloTriangle::PopulateCommandList()
     const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
     m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
     m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    
+    // OLD: Vertex Draw
+    //m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+    //m_commandList->DrawInstanced(6, 1, 0, 0);
+
+    // NEW: Indexed Draw
     m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
-    m_commandList->DrawInstanced(3, 1, 0, 0);
+    m_commandList->IASetIndexBuffer(&m_indexBufferView);
+    m_commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
 
     // Indicate that the back buffer will now be used to present.
     CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(

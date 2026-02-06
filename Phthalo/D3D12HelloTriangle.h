@@ -59,6 +59,9 @@ private:
     ComPtr<ID3D12Resource> m_vertexBuffer;
     D3D12_VERTEX_BUFFER_VIEW m_vertexBufferView;
 
+    ComPtr<ID3D12Resource> m_indexBuffer;
+    D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
+
     // Synchronization objects.
     UINT m_frameIndex;
     HANDLE m_fenceEvent;
