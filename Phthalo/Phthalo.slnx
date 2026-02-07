@@ -1,7 +1,0 @@
-<Solution>
-  <Configurations>
-    <Platform Name="x64" />
-    <Platform Name="x86" />
-  </Configurations>
-  <Project Path="Phthalo.vcxproj" Id="3d31d58c-ba67-44d6-892f-c91e11f5b08a" />
-</Solution>
