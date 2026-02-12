@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DXApplication.h"
+#include "Camera.h"
 
 using namespace DirectX;
 
@@ -88,4 +89,7 @@ private:
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
     void WaitForGPU();
+
+    // ----- Camera stuff -----
+    Camera m_camera;
 };
