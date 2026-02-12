@@ -45,7 +45,7 @@ private:
 
     // command list things.
     ComPtr<ID3D12GraphicsCommandList> m_commandList;    // records gpu commands -> submitted to command queue.
-    ComPtr<ID3D12CommandAllocator> m_commandAllocator;  // manages memory for gpu commands.
+    ComPtr<ID3D12CommandAllocator> m_commandAllocators[FrameCount];  // manages memory for gpu commands.
     ComPtr<ID3D12CommandQueue> m_commandQueue;          // submits commands recorded by m_commandList.
 
     // descriptors for the render targets. 
@@ -79,10 +79,13 @@ private:
                                     // its modified by the cpu.
     HANDLE m_fenceEvent;            // event that waits for gpu work to complete.
                                     // apparently this isnt best practice, look into optimizations?
-    UINT64 m_fenceValue;            // counter (for now)
+    UINT64 m_fenceValues[FrameCount];            // counter (for now)
 
     void LoadPipeline();            // loads and initializes the core pipeline objects. 
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
-    void WaitForPreviousFrame();    // waits for the gpu frame to finish. again, not best practice.
+
+    // stuff to replace WaitForPreviousFrame()
+    void MoveToNextFrame();
+    void WaitForGPU();
 };

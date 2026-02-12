@@ -7,6 +7,7 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_frameIndex(0),
 	m_viewport(0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)),
 	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
+	m_fenceValues{},
 	m_rtvDescriptorSize(0)
 {
 }
@@ -34,13 +35,13 @@ void D3D12Renderer::OnRender()
 	// present the frame
 	ThrowIfFailed(m_swapChain->Present(1, 0));
 
-	WaitForPreviousFrame();
+	MoveToNextFrame();
 }
 
 void D3D12Renderer::OnDestroy()
 {
-	// make sure we wait for the previous frame so we don't reference destroyed resources
-	WaitForPreviousFrame();
+	// make sure we wait so we don't reference destroyed resources on the GPU
+	WaitForGPU();
 
 	CloseHandle(m_fenceEvent);
 }
@@ -80,7 +81,6 @@ void D3D12Renderer::LoadPipeline()
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
 	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
-	ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocator)));
 
 	// create swap chain
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -121,6 +121,9 @@ void D3D12Renderer::LoadPipeline()
 		ThrowIfFailed(m_swapChain->GetBuffer(n, IID_PPV_ARGS(&m_renderTargets[n])));
 		m_device->CreateRenderTargetView(m_renderTargets[n].Get(), nullptr, rtvHandle);
 		rtvHandle.Offset(1, m_rtvDescriptorSize);
+
+		// create command allocator
+		ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
 	}
 
 	// also, disable alt+enter full-screen transitions - too jank
@@ -194,7 +197,7 @@ void D3D12Renderer::LoadAssets()
 	// create the command list
 	ThrowIfFailed(m_device->CreateCommandList(0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		m_commandAllocator.Get(),
+		m_commandAllocators[m_frameIndex].Get(),
 		m_pipelineState.Get(),
 		IID_PPV_ARGS(&m_commandList)
 	));
@@ -272,8 +275,8 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- synchronization objects, fences and such ----------
 	// create fence and wait for the gpu.
-	ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-	m_fenceValue = 1;
+	ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+	m_fenceValues[m_frameIndex]++;
 
 	// create fence event handle for frame synchronization.
 	m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -283,18 +286,17 @@ void D3D12Renderer::LoadAssets()
 	}
 
 	// wait for setup to complete, in this case
-	WaitForPreviousFrame();
-
+	WaitForGPU();
 }
 
 void D3D12Renderer::PopulateCommandList()
 {
 	// reset the command allocator.
 	// can only work if the command lists have finished execution on gpu.
-	ThrowIfFailed(m_commandAllocator->Reset());
+	ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
 
 	// also need to reset command list
-	ThrowIfFailed(m_commandList->Reset(m_commandAllocator.Get(), m_pipelineState.Get()));
+	ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), m_pipelineState.Get()));
 
 	// set states
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
@@ -332,22 +334,34 @@ void D3D12Renderer::PopulateCommandList()
 	ThrowIfFailed(m_commandList->Close());
 }
 
-void D3D12Renderer::WaitForPreviousFrame()
+void D3D12Renderer::MoveToNextFrame()
 {
-	// essentially: wait for the previous frame to complete before continuing.
-	// apparently this is not best practice.
-	// TODO: Fix this according to D3D12HelloFrameBuffering
+	 // Schedule a Signal command in the queue.
+    const UINT64 currentFenceValue = m_fenceValues[m_frameIndex];
+    ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), currentFenceValue));
 
-	const UINT64 fence = m_fenceValue;
-	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), fence));
-	m_fenceValue++;
+    // Update the frame index.
+    m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
 
-	// wait
-	if (m_fence->GetCompletedValue() < fence)
-	{
-		ThrowIfFailed(m_fence->SetEventOnCompletion(fence, m_fenceEvent));
-		WaitForSingleObject(m_fenceEvent, INFINITE);
-	}
+    // If the next frame is not ready to be rendered yet, wait until it is ready.
+    if (m_fence->GetCompletedValue() < m_fenceValues[m_frameIndex])
+    {
+        ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+        WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+    }
 
-	m_frameIndex = m_swapChain->GetCurrentBackBufferIndex();
+    // Set the fence value for the next frame.
+    m_fenceValues[m_frameIndex] = currentFenceValue + 1;
+}
+
+void D3D12Renderer::WaitForGPU()
+{
+	ThrowIfFailed(m_commandQueue->Signal(m_fence.Get(), m_fenceValues[m_frameIndex]));
+
+    // Wait until the fence has been processed.
+    ThrowIfFailed(m_fence->SetEventOnCompletion(m_fenceValues[m_frameIndex], m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+    // Increment the fence value for the current frame.
+    m_fenceValues[m_frameIndex]++;
 }
