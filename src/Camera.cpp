@@ -35,6 +35,21 @@ void Camera::OnKeyUp(UINT8 key) {
     m_keys[key] = false;
 }
 
+void Camera::OnMouseMove(int dx, int dy) {
+    m_yaw += dx * m_mouseSensitivity;
+    m_pitch += dy * m_mouseSensitivity;
+
+    // clamp pitch so you can't flip over
+    {
+        if (m_pitch > 89.0f)
+            m_pitch = 89.0f;
+        if (m_pitch < -89.0f)
+            m_pitch = -89.0f;
+    }
+
+    updateCameraVectors();
+}
+
 XMMATRIX Camera::GetViewMatrix() const {
     XMVECTOR pos   = XMLoadFloat3(&m_position);
     XMVECTOR front = XMLoadFloat3(&m_front);

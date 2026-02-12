@@ -104,4 +104,5 @@ private:
 
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
+    void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
 };

@@ -15,6 +15,7 @@ public:
     void Update(float dt); // called in OnUpdate
     void OnKeyDown(UINT8 key);
     void OnKeyUp(UINT8 key);
+    void OnMouseMove(int dx, int dy);
 
     XMMATRIX GetViewMatrix() const;
     XMMATRIX GetProjectionMatrix(float aspectRatio) const;
@@ -29,7 +30,7 @@ public:
     float m_pitch;
 
     float m_movementSpeed = 3.0f;
-    float m_mouseSensitivity = 0.002f;
+    float m_mouseSensitivity = 0.02f;
     float m_zoom = 60.0f;
 
     // key state

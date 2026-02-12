@@ -3,6 +3,17 @@
 
 HWND Win32Application::m_hwnd = nullptr;
 
+// helper to move cursor to window center
+static POINT RecenterCursor(HWND hwnd)
+{
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    POINT center = { (rect.right - rect.left) / 2, (rect.bottom - rect.top) / 2 };
+    ClientToScreen(hwnd, &center);
+    SetCursorPos(center.x, center.y);
+    return center;
+}
+
 int Win32Application::Run(DXApplication* pSample, HINSTANCE hInstance, int nCmdShow)
 {
 	const int width = 800;
@@ -38,6 +49,10 @@ int Win32Application::Run(DXApplication* pSample, HINSTANCE hInstance, int nCmdS
 
 	pSample->OnInit();
 
+	// hide cursor and lock it to the window
+	ShowCursor(FALSE);
+    RecenterCursor(m_hwnd);
+
 	ShowWindow(m_hwnd, nCmdShow);
 
 	MSG msg = {};
@@ -50,6 +65,8 @@ int Win32Application::Run(DXApplication* pSample, HINSTANCE hInstance, int nCmdS
 			DispatchMessage(&msg);
 		}
 	}
+
+	ShowCursor(TRUE);
 
 	pSample->OnDestroy();
 
@@ -92,6 +109,42 @@ LRESULT Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPA
 			pSample->OnRender();
 		}
 		return 0;
+
+	case WM_MOUSEMOVE:
+		if (pSample)
+		{
+			POINT cursor;
+			GetCursorPos(&cursor);
+
+			// find window center in screen space
+			RECT rect;
+			GetClientRect(hWnd, &rect);
+			POINT center = { (rect.right - rect.left) / 2, (rect.bottom - rect.top) / 2 };
+			ClientToScreen(hWnd, &center);
+
+			int dx = cursor.x - center.x;
+			int dy = cursor.y - center.y;
+
+			// only forward if there was actual movement
+			// (avoids feedback loop from the RecenterCursor call itself)
+			if (dx != 0 || dy != 0)
+			{
+				pSample->OnMouseMove(-dx, -dy);
+				RecenterCursor(hWnd);
+			}
+		}
+		return 0;
+
+	// release cursor on escape
+	case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE)
+            ShowCursor(TRUE);
+        else
+        {
+            ShowCursor(FALSE);
+            RecenterCursor(hWnd);
+        }
+        return 0;
 
 	case WM_DESTROY:
 		PostQuitMessage(0);
