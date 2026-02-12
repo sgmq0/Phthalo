@@ -93,6 +93,10 @@ LRESULT Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPA
 		{
 			pSample->OnKeyDown(static_cast<UINT8>(wParam));
 		}
+		if (wParam == VK_ESCAPE)
+		{
+			PostQuitMessage(0);
+		}
 		return 0;
 
 	case WM_KEYUP:
@@ -145,6 +149,8 @@ LRESULT Win32Application::WindowProc(HWND hWnd, UINT message, WPARAM wParam, LPA
             RecenterCursor(hWnd);
         }
         return 0;
+
+	
 
 	case WM_DESTROY:
 		PostQuitMessage(0);
