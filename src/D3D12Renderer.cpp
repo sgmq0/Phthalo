@@ -228,10 +228,10 @@ void D3D12Renderer::LoadAssets()
 	{
 		Vertex triangleVertices[] =
 		{
-			{ { -0.25f,  0.25f * m_aspectRatio, 0.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },  // 0: Top-left (red)
-			{ {  0.25f,  0.25f * m_aspectRatio, 0.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 1: Top-right (green)
-			{ { -0.25f, -0.25f * m_aspectRatio, 0.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } },  // 2: Bottom-left (blue)
-			{ {  0.25f, -0.25f * m_aspectRatio, 0.0f }, { 1.0f, 1.0f, 0.0f, 1.0f } }   // 3: Bottom-right (yellow)
+			{ { -0.5f,  0.5f, 2.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },  // 0: Top-left (red)
+			{ {  0.5f,  0.5f, 2.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 1: Top-right (green)
+			{ { -0.5f, -0.5f, 2.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } },  // 2: Bottom-left (blue)
+			{ {  0.5f, -0.5f, 2.0f }, { 1.0f, 1.0f, 0.0f, 1.0f } }   // 3: Bottom-right (yellow)
 		};
 		const UINT vertexBufferSize = sizeof(triangleVertices);
 
