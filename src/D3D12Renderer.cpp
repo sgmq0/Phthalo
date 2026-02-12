@@ -22,6 +22,20 @@ void D3D12Renderer::OnInit()
 void D3D12Renderer::OnUpdate()
 {
 	// update camera and stuff here
+	UINT64 now = GetTickCount64();
+    float dt = (m_lastFrameTime == 0) ? 0.0f : (now - m_lastFrameTime) / 1000.0f;
+    m_lastFrameTime = now;
+
+    m_camera.Update(dt);
+
+    // build mvp
+    XMMATRIX model = XMMatrixIdentity();
+    XMMATRIX view  = m_camera.GetViewMatrix();
+    XMMATRIX proj  = m_camera.GetProjectionMatrix(static_cast<float>(m_width) / m_height);
+    XMMATRIX mvp   = XMMatrixTranspose(model * view * proj);
+
+    XMStoreFloat4x4(&m_cbData.mvp, mvp);
+    memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
 }
 
 void D3D12Renderer::OnRender()
@@ -133,12 +147,15 @@ void D3D12Renderer::LoadPipeline()
 
 void D3D12Renderer::LoadAssets()
 {
-	// create the root signature (empty, for now)
-	// TODO: needs to be updated when we create the camera
+	// create one root descriptor visible to vertex shader at b0
+	CD3DX12_ROOT_PARAMETER rootParam;
+	rootParam.InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
+
+	// create the root signature w camera
 	CD3DX12_ROOT_SIGNATURE_DESC rootSignatureDesc;
 	rootSignatureDesc.Init(
-		0, 
-		nullptr, 
+		1, 
+		&rootParam, 
 		0, 
 		nullptr, 
 		D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
@@ -274,6 +291,26 @@ void D3D12Renderer::LoadAssets()
 		m_indexBufferView.SizeInBytes = indexBufferSize;
 	}
 
+	// ---------- constant buffer (MVP matrix) ----------
+	{
+		const UINT cbSize = (sizeof(MVPConstantBuffer) + 255) & ~255;  // must be 256-byte aligned
+
+		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&heapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_constantBuffer)));
+
+		// map it once and leave it mapped — safe for upload heaps
+		CD3DX12_RANGE readRange(0, 0);
+		ThrowIfFailed(m_constantBuffer->Map(0, &readRange,
+			reinterpret_cast<void**>(&m_pCbvDataBegin)));
+	}
+
 	// ---------- synchronization objects, fences and such ----------
 	// create fence and wait for the gpu.
 	ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
@@ -303,6 +340,10 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->SetGraphicsRootSignature(m_rootSignature.Get());
 	m_commandList->RSSetViewports(1, &m_viewport);
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);
+
+	m_commandList->SetGraphicsRootConstantBufferView(
+    0,                                              // root parameter index
+    m_constantBuffer->GetGPUVirtualAddress());
 
 	// create resource barriers and stuff for back buffer
 	CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
