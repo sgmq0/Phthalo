@@ -16,9 +16,11 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 
 void D3D12Renderer::OnInit()
 {
+	m_sphere.LoadMesh();
+	m_sphereIndexCount = m_sphere.sphereIndices.size();
+
 	LoadPipeline();
 	LoadAssets();
-	m_sphere.LoadMesh();
 }
 
 void D3D12Renderer::OnUpdate()
@@ -228,14 +230,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the vertex buffer ----------
 	{
-		SphereMesh::Vertex triangleVertices[] =
-		{
-			{ { -0.5f,  0.5f, 2.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },  // 0: Top-left (red)
-			{ {  0.5f,  0.5f, 2.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 1: Top-right (green)
-			{ { -0.5f, -0.5f, 2.0f }, { 0.0f, 0.0f, 1.0f, 1.0f } },  // 2: Bottom-left (blue)
-			{ {  0.5f, -0.5f, 2.0f }, { 1.0f, 1.0f, 0.0f, 1.0f } }   // 3: Bottom-right (yellow)
-		};
-		const UINT vertexBufferSize = sizeof(triangleVertices);
+		const UINT vertexBufferSize = m_sphere.sphereVertices.size() * sizeof(SphereMesh::Vertex);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
@@ -251,7 +246,7 @@ void D3D12Renderer::LoadAssets()
 		UINT8* pVertexDataBegin;
 		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
 		ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
-		memcpy(pVertexDataBegin, triangleVertices, sizeof(triangleVertices));
+		memcpy(pVertexDataBegin, m_sphere.sphereVertices.data(), vertexBufferSize);
 		m_vertexBuffer->Unmap(0, nullptr);
 
 		// init vertex buffer view
@@ -262,13 +257,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the index buffer ----------
 	{
-		UINT32 indices[] =
-		{
-			0, 1, 2,
-			1, 3, 2
-		};
-
-		const UINT indexBufferSize = sizeof(indices);
+		const UINT indexBufferSize = m_sphere.sphereIndices.size() * sizeof(UINT32);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
@@ -284,7 +273,7 @@ void D3D12Renderer::LoadAssets()
 		UINT8* pIndexDataBegin;
 		CD3DX12_RANGE readRange(0, 0);
 		ThrowIfFailed(m_indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
-		memcpy(pIndexDataBegin, indices, sizeof(indices));
+		memcpy(pIndexDataBegin, m_sphere.sphereIndices.data(), indexBufferSize);
 		m_indexBuffer->Unmap(0, nullptr);
 
 		// init index buffer view
@@ -366,7 +355,7 @@ void D3D12Renderer::PopulateCommandList()
 	// indexed draw
 	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(6, 1, 0, 0, 0);
+	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, 1, 0, 0, 0);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(

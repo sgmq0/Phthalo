@@ -101,4 +101,5 @@ private:
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
 
     SphereMesh m_sphere;
+    size_t m_sphereIndexCount;
 };
