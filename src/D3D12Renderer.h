@@ -88,18 +88,31 @@ private:
     ComPtr<ID3D12Resource> m_constantBuffer;
     UINT8* m_pCbvDataBegin = nullptr;  // persistent mapped pointer
 
-    struct MVPConstantBuffer {
-        XMFLOAT4X4 mvp;
+    struct VPConstantBuffer {
+        XMFLOAT4X4 vp;
     };
-    MVPConstantBuffer m_cbData;
+    VPConstantBuffer m_cbData;
 
     Camera m_camera;
     UINT64 m_lastFrameTime = 0;
 
+    // ----- instancing stuff -----
+    SphereMesh m_sphere;
+    size_t m_sphereIndexCount;
+
+    struct InstanceData {
+        XMFLOAT4X4 worldMatrix;
+    };
+
+    static const UINT MAX_PARTICLES = 100;
+
+    ComPtr<ID3D12Resource> m_instanceBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_instanceBufferView;
+    UINT8* m_pInstanceDataBegin = nullptr;
+    UINT m_particleCount = 2;
+
+    // ----- controls -----
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
-
-    SphereMesh m_sphere;
-    size_t m_sphereIndexCount;
 };

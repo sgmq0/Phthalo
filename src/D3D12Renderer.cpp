@@ -36,10 +36,21 @@ void D3D12Renderer::OnUpdate()
     XMMATRIX model = XMMatrixIdentity();
     XMMATRIX view  = m_camera.GetViewMatrix();
     XMMATRIX proj  = m_camera.GetProjectionMatrix(static_cast<float>(m_width) / m_height);
-    XMMATRIX mvp   = XMMatrixTranspose(model * view * proj);
-
-    XMStoreFloat4x4(&m_cbData.mvp, mvp);
+	
+    XMMATRIX vp   = XMMatrixTranspose(view * proj);
+    XMStoreFloat4x4(&m_cbData.vp, vp);
     memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
+
+	// write per instance data
+	InstanceData instances[2];
+
+	XMMATRIX world0 = XMMatrixTranspose(XMMatrixTranslation(-3.0f, 0.0f, 3.0f));
+	XMMATRIX world1 = XMMatrixTranspose(XMMatrixTranslation( 3.0f, 0.0f, 3.0f));
+
+	XMStoreFloat4x4(&instances[0].worldMatrix, world0);
+	XMStoreFloat4x4(&instances[1].worldMatrix, world1);
+
+	memcpy(m_pInstanceDataBegin, instances, sizeof(InstanceData) * 2);
 }
 
 void D3D12Renderer::OnRender()
@@ -193,9 +204,16 @@ void D3D12Renderer::LoadAssets()
 	// needs to be consistent with Vertex struct in SphereMesh.h
 	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
 	{
+		// per vertex data
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+
+		// per instance data
+		{ "INSTANCE_TRANSFORM", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1,  0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
 	};
 
 	// describe the graphics pipeline state object (PSO)
@@ -285,7 +303,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- constant buffer (MVP matrix) ----------
 	{
-		const UINT cbSize = (sizeof(MVPConstantBuffer) + 255) & ~255;  // must be 256-byte aligned
+		const UINT cbSize = (sizeof(VPConstantBuffer) + 255) & ~255;  // must be 256-byte aligned
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(cbSize);
@@ -301,6 +319,31 @@ void D3D12Renderer::LoadAssets()
 		CD3DX12_RANGE readRange(0, 0);
 		ThrowIfFailed(m_constantBuffer->Map(0, &readRange,
 			reinterpret_cast<void**>(&m_pCbvDataBegin)));
+	}
+
+	// ---------- create the instancing buffer ----------
+	{
+		const UINT instanceBufferSize = MAX_PARTICLES * sizeof(InstanceData);
+
+		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(instanceBufferSize);
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&heapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_instanceBuffer)));
+
+		// copy instance data to instance buffer
+		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
+		ThrowIfFailed(m_instanceBuffer->Map(0, &readRange, 
+			reinterpret_cast<void**>(&m_pInstanceDataBegin)));
+
+		// init instance buffer view
+		m_instanceBufferView.BufferLocation = m_instanceBuffer->GetGPUVirtualAddress();
+		m_instanceBufferView.StrideInBytes = sizeof(InstanceData);
+		m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
 	// ---------- synchronization objects, fences and such ----------
@@ -354,9 +397,10 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
 	// indexed draw
-	m_commandList->IASetVertexBuffers(0, 1, &m_vertexBufferView);
+	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_instanceBufferView };
+	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, 1, 0, 0, 0);
+	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, m_particleCount, 0, 0, 0);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
