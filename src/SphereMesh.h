@@ -11,6 +11,7 @@ public:
     struct Vertex
 	{
 		XMFLOAT3 position;
+        XMFLOAT3 normal;
 		XMFLOAT4 color;
 	};
 
@@ -33,6 +34,9 @@ public:
                     m_radius * cosf(phi),
                     m_radius * sinf(phi) * sinf(theta)
                 };
+
+                XMVECTOR n = XMVector3Normalize(XMLoadFloat3(&v.position));
+                XMStoreFloat3(&v.normal, n);
 
                 // normal is just the normalized position for a unit sphere
                 v.color = {1.0f, 0.0f, 0.0f, 1.0f};

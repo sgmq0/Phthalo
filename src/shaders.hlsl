@@ -1,14 +1,3 @@
-//*********************************************************
-//
-// Copyright (c) Microsoft. All rights reserved.
-// This code is licensed under the MIT License (MIT).
-// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
-// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
-// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
-// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
-//
-//*********************************************************
-
 // constant buffer b0, updated every frame
 cbuffer MVPBuffer : register(b0)
 {
@@ -18,14 +7,16 @@ cbuffer MVPBuffer : register(b0)
 struct PSInput
 {
     float4 position : SV_POSITION;
+    float4 normal : NORMAL;
     float4 color : COLOR;
 };
 
-PSInput VSMain(float4 position : POSITION, float4 color : COLOR)
+PSInput VSMain(float4 position : POSITION, float4 normal : NORMAL, float4 color : COLOR)
 {
     PSInput result;
 
     result.position = mul(position, mvp);
+    result.normal = normal;
     result.color = color;
 
     return result;
@@ -33,5 +24,12 @@ PSInput VSMain(float4 position : POSITION, float4 color : COLOR)
 
 float4 PSMain(PSInput input) : SV_TARGET
 {
-    return input.color;
+    float3 norm = normalize(input.normal.xyz);
+    float3 lightPos = float3(10.0, -10.0, 10.0);
+    float3 lightDir = normalize(lightPos - input.position.xyz);
+    
+    float diff = max(dot(norm, lightDir), 0.0);
+    float3 result = diff * input.color.xyz;
+
+    return float4(result.x, result.y, result.z, 1.0);
 }
