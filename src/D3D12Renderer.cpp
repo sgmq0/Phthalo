@@ -9,7 +9,8 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
-	m_camera(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f)
+	m_camera(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
+	m_sphere(SphereMesh(1.0f))
 {
 }
 
@@ -17,6 +18,7 @@ void D3D12Renderer::OnInit()
 {
 	LoadPipeline();
 	LoadAssets();
+	m_sphere.LoadMesh();
 }
 
 void D3D12Renderer::OnUpdate()
@@ -226,7 +228,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the vertex buffer ----------
 	{
-		Vertex triangleVertices[] =
+		SphereMesh::Vertex triangleVertices[] =
 		{
 			{ { -0.5f,  0.5f, 2.0f }, { 1.0f, 0.0f, 0.0f, 1.0f } },  // 0: Top-left (red)
 			{ {  0.5f,  0.5f, 2.0f }, { 0.0f, 1.0f, 0.0f, 1.0f } },  // 1: Top-right (green)
@@ -254,7 +256,7 @@ void D3D12Renderer::LoadAssets()
 
 		// init vertex buffer view
 		m_vertexBufferView.BufferLocation = m_vertexBuffer->GetGPUVirtualAddress();
-		m_vertexBufferView.StrideInBytes = sizeof(Vertex);
+		m_vertexBufferView.StrideInBytes = sizeof(SphereMesh::Vertex);
 		m_vertexBufferView.SizeInBytes = vertexBufferSize;
 	}
 

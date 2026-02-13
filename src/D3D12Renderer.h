@@ -2,6 +2,7 @@
 
 #include "DXApplication.h"
 #include "Camera.h"
+#include "SphereMesh.h"
 
 using namespace DirectX;
 
@@ -20,13 +21,6 @@ public:
 private:
     // use double buffering - two render targets.
 	static const UINT FrameCount = 2;
-
-    // vertex struct, self-explanatory.
-	struct Vertex
-	{
-		XMFLOAT3 position;
-		XMFLOAT4 color;
-	};
 
 	// ----- pipeline objects created in LoadPipeline() -----
 
@@ -105,4 +99,6 @@ private:
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
+
+    SphereMesh m_sphere;
 };
