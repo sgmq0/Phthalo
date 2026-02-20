@@ -86,6 +86,7 @@ private:
 
     void LoadParticles();
     void UpdateParticles(float dt);
+    void SolveConstraints(float dist, float distSquared);
 
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
@@ -121,10 +122,13 @@ private:
     // ----- actual particle sim stuff -----
     struct Particle {
         XMFLOAT3 position;
+        XMFLOAT3 predictedPosition;
         XMFLOAT3 velocity;
+        float lambda;
+        std::vector<int> neighbors;
     };
     
-    static const UINT NUM_PARTICLES = 100;
+    static const UINT NUM_PARTICLES = 1000;
     Particle m_particles[NUM_PARTICLES];
 
     // ----- controls -----
