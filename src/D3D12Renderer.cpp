@@ -1,6 +1,9 @@
 
 #include "stdafx.h"
 #include "D3D12Renderer.h"
+#include <random>
+
+std::mt19937 rng(std::random_device{}());
 
 D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	DXApplication(width, height, L"Renderer"),
@@ -16,10 +19,8 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 
 void D3D12Renderer::OnInit()
 {
-	m_sphere.LoadMesh();
-	m_sphereIndexCount = m_sphere.sphereIndices.size();
-
 	LoadPipeline();
+	LoadParticles();
 	LoadAssets();
 }
 
@@ -42,15 +43,11 @@ void D3D12Renderer::OnUpdate()
     memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
 
 	// write per instance data
-	InstanceData instances[2];
+	// change this into particles...
 
-	XMMATRIX world0 = XMMatrixTranslation(-1.0f, 0.0f, 3.0f);
-	XMMATRIX world1 = XMMatrixTranslation( 1.0f, 0.0f, 3.0f);
+	UpdateParticles(dt);
 
-	XMStoreFloat4x4(&instances[0].worldMatrix, world0);
-	XMStoreFloat4x4(&instances[1].worldMatrix, world1);
-
-	memcpy(m_pInstanceDataBegin, instances, sizeof(InstanceData) * 2);
+	memcpy(m_pInstanceDataBegin, m_instances.data(), sizeof(InstanceData) * NUM_PARTICLES); // particles!!!
 }
 
 void D3D12Renderer::OnRender()
@@ -160,8 +157,51 @@ void D3D12Renderer::LoadPipeline()
 	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
 }
 
+
+void D3D12Renderer::LoadParticles()
+{
+	std::uniform_real_distribution<float> pos(-10.0f, 10.0f);
+	std::uniform_real_distribution<float> vel(-2.0f, 2.0f);
+
+	// populate the m_particles array
+	for (int i = 0; i < NUM_PARTICLES; i++) {
+        m_particles[i].position = {pos(rng), pos(rng), pos(rng)};
+        m_particles[i].velocity = {vel(rng), vel(rng), vel(rng)};
+    }
+
+	m_instances.resize(NUM_PARTICLES);
+
+}
+
+void D3D12Renderer::UpdateParticles(float dt)
+{
+	for (int i = 0; i < NUM_PARTICLES; i++) {
+		m_particles[i].velocity.y -= 9.8f * dt;
+        m_particles[i].position.x += m_particles[i].velocity.x * dt;
+        m_particles[i].position.y += m_particles[i].velocity.y * dt;
+        m_particles[i].position.z += m_particles[i].velocity.z * dt;
+
+		if (m_particles[i].position.y < 0) {
+			m_particles[i].velocity.y *= -1;
+		}
+
+        // write to instance buffer to actually draw the points
+        XMMATRIX mat = XMMatrixTranslation(
+            m_particles[i].position.x,
+            m_particles[i].position.y,
+            m_particles[i].position.z
+        );
+
+        XMStoreFloat4x4(&m_instances[i].worldMatrix, mat);
+    }
+}
+
 void D3D12Renderer::LoadAssets()
 {
+	// load sphere mesh
+	m_sphere.LoadMesh();
+	m_sphereIndexCount = m_sphere.sphereIndices.size();
+
 	// create one root descriptor visible to vertex shader at b0
 	CD3DX12_ROOT_PARAMETER rootParam;
 	rootParam.InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
@@ -357,7 +397,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the instancing buffer ----------
 	{
-		const UINT instanceBufferSize = MAX_PARTICLES * sizeof(InstanceData);
+		const UINT instanceBufferSize = NUM_PARTICLES * sizeof(InstanceData);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(instanceBufferSize);
@@ -436,7 +476,7 @@ void D3D12Renderer::PopulateCommandList()
 	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_instanceBufferView };
 	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, m_particleCount, 0, 0, 0);
+	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, NUM_PARTICLES, 0, 0, 0);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(

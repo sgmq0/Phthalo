@@ -84,6 +84,9 @@ private:
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
 
+    void LoadParticles();
+    void UpdateParticles(float dt);
+
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
     void WaitForGPU();
@@ -104,16 +107,25 @@ private:
     SphereMesh m_sphere;
     size_t m_sphereIndexCount;
 
+    // just stores the positions of the sphere instances....
     struct InstanceData {
         XMFLOAT4X4 worldMatrix;
     };
 
-    static const UINT MAX_PARTICLES = 100;
-
     ComPtr<ID3D12Resource> m_instanceBuffer;
     D3D12_VERTEX_BUFFER_VIEW m_instanceBufferView;
     UINT8* m_pInstanceDataBegin = nullptr;
-    UINT m_particleCount = 2;
+
+    std::vector<InstanceData> m_instances;
+
+    // ----- actual particle sim stuff -----
+    struct Particle {
+        XMFLOAT3 position;
+        XMFLOAT3 velocity;
+    };
+    
+    static const UINT NUM_PARTICLES = 100;
+    Particle m_particles[NUM_PARTICLES];
 
     // ----- controls -----
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
