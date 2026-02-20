@@ -64,6 +64,10 @@ private:
     ComPtr<ID3D12Resource> m_indexBuffer;           // ditto, for index buffer
     D3D12_INDEX_BUFFER_VIEW m_indexBufferView;
 
+    // depth buffer stuff
+    ComPtr<ID3D12Resource> m_depthBuffer;
+    ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
+
     // ----- Synchronization objects. -----
     UINT m_frameIndex;              // tracks the currently used frame buffer (0 or 1)
                                     // and uses it to index into m_renderTargets.
