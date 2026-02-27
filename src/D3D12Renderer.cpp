@@ -12,8 +12,8 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
-	m_camera(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
-	m_particleSystem(ParticleSystem(1000))
+	m_camera(XMFLOAT3(-10.0f, 2.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
+	m_particleSystem(ParticleSystem(500))
 {
 }
 

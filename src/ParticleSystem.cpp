@@ -124,14 +124,15 @@ XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, 
 void ParticleSystem::Update(float dt) {
     if (dt <= 0.0f || dt > 0.1f) return;
 
-	const float radius   = 1.0f;
-	const float distSquared = radius * radius;
-    const float rho_0    = 10.0f;       // rest density
-    const float epsilon  = 1000.0f;
-    const float damping  = 0.999f;
-    const float boxSize  = 3.0f;
+	const float radius      = 1.0f;
+    const float radius2     = radius * radius;
+    const float rho_0       = 10.0f;       // rest density
+    const float epsilon     = 1000.0f;
+    const float damping     = 0.999f;
+    const float boxSize     = 3.0f;
     const float restitution = 0.3f;
-    const int iterations = 3;
+    const float viscosity   = 0.05f;
+    const int iterations    = 3;
 
     // ------------ STEP 1: PREDICT POSITIONS --------------
 	for (int i = 0; i < NUM_PARTICLES; i++) {
@@ -149,7 +150,6 @@ void ParticleSystem::Update(float dt) {
 	for (int i = 0; i < NUM_PARTICLES; i++) {
 		m_particles[i].neighbors.clear();
 	}
-
     
 	for (int i = 0; i < NUM_PARTICLES; i++) {
 		for (int j = i + 1; j < NUM_PARTICLES; j++) {
@@ -158,7 +158,7 @@ void ParticleSystem::Update(float dt) {
 			float dz = m_particles[i].predictedPosition.z - m_particles[j].predictedPosition.z;
 			float dist2 = dx*dx + dy*dy + dz*dz;
 
-			if (dist2 < distSquared) {
+			if (dist2 < radius2) {
 				m_particles[i].neighbors.push_back(j);
 				m_particles[j].neighbors.push_back(i);
 			}
@@ -235,28 +235,51 @@ void ParticleSystem::Update(float dt) {
 		}
     }
 
+    std::vector<float> densities(NUM_PARTICLES, 0.0f);
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        densities[i] = ComputeDensityConstraint(i, radius);
+    }
+
+    // XSPH viscosity computation
+    std::vector<XMFLOAT3> xsph(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        for (int j : m_particles[i].neighbors) {
+            float val = Poly6(SubtractFloat3(m_particles[i].position, m_particles[j].position), radius);
+            XMFLOAT3 velocity = SubtractFloat3(m_particles[j].velocity, m_particles[i].velocity);
+
+            float coeff = 1.0f / densities[i];
+            xsph[i].x += val * velocity.x;
+            xsph[i].y += val * velocity.y;
+            xsph[i].z += val * velocity.z;
+        }
+    }
+
 	// update positions and velocity
 	for (int i = 0; i < NUM_PARTICLES; i++) {
-        XMFLOAT3 pred = m_particles[i].predictedPosition;
+        XMFLOAT3& pred = m_particles[i].predictedPosition;
 
         // constraints
-        // if (pred.x <= -boxSize) {
-        //     m_particles[i].predictedPosition.x = -boxSize;
-        //     m_particles[i].velocity.x *= -1.0f;
-        //     m_particles[i].velocity.y *= -1.0f;
-        //     m_particles[i].velocity.z *= -1.0f;
-        // }
-        m_particles[i].predictedPosition.x = max(m_particles[i].predictedPosition.x, -boxSize); 
-        m_particles[i].predictedPosition.x = min(m_particles[i].predictedPosition.x, boxSize);
-        m_particles[i].predictedPosition.y = max(m_particles[i].predictedPosition.y, 0.0f); 
-        m_particles[i].predictedPosition.y = min(m_particles[i].predictedPosition.y, 8.0f);
-        m_particles[i].predictedPosition.z = max(m_particles[i].predictedPosition.z, -boxSize); 
-        m_particles[i].predictedPosition.z = min(m_particles[i].predictedPosition.z, boxSize);
+        pred.x = max(pred.x, -boxSize); 
+        pred.x = min(pred.x, boxSize);
+        pred.y = max(pred.y, 0.0f); 
+        pred.y = min(pred.y, 8.0f);
+        pred.z = max(pred.z, -boxSize); 
+        pred.z = min(pred.z, boxSize);
 
-        m_particles[i].velocity.x = damping * (m_particles[i].predictedPosition.x - m_particles[i].position.x) / dt;
-		m_particles[i].velocity.y = damping * (m_particles[i].predictedPosition.y - m_particles[i].position.y) / dt;
-		m_particles[i].velocity.z = damping * (m_particles[i].predictedPosition.z - m_particles[i].position.z) / dt;
-		m_particles[i].position = m_particles[i].predictedPosition;
+        // update velocity
+        m_particles[i].velocity.x = damping * (pred.x - m_particles[i].position.x) / dt;
+		m_particles[i].velocity.y = damping * (pred.y - m_particles[i].position.y) / dt;
+		m_particles[i].velocity.z = damping * (pred.z - m_particles[i].position.z) / dt;
+
+        // apply XSPH velocity
+        m_particles[i].velocity.x += xsph[i].x * viscosity;
+        m_particles[i].velocity.y += xsph[i].y * viscosity;
+        m_particles[i].velocity.z += xsph[i].z * viscosity;
+
+        // TODO: vorticity confinement
+
+        // update position 
+		m_particles[i].position = pred;
 	}
 
 	UpdateInstances();
