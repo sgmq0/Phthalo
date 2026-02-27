@@ -2,8 +2,8 @@
 
 #include "DXApplication.h"
 #include "Camera.h"
-#include "SphereMesh.h"
 #include "ParticleSystem.h"
+#include "Instancer.h"
 
 using namespace DirectX;
 
@@ -81,6 +81,9 @@ private:
                                     // apparently this isnt best practice, look into optimizations?
     UINT64 m_fenceValues[FrameCount];            // counter (for now)
 
+    // handles all the particles and instancing
+    ParticleSystem m_particleSystem;
+
     void LoadPipeline();            // loads and initializes the core pipeline objects. 
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
@@ -100,19 +103,6 @@ private:
 
     Camera m_camera;
     UINT64 m_lastFrameTime = 0;
-
-    // ----- instancing stuff -----
-    SphereMesh m_sphere;
-    size_t m_sphereIndexCount;
-
-    ComPtr<ID3D12Resource> m_instanceBuffer;
-    D3D12_VERTEX_BUFFER_VIEW m_instanceBufferView;
-    UINT8* m_pInstanceDataBegin = nullptr;
-
-    std::vector<InstanceData> m_instances;
-
-    // ----- actual particle sim stuff -----
-    ParticleSystem m_particleSystem;
 
     // ----- controls -----
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }

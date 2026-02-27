@@ -2,16 +2,18 @@
 #include "ParticleSystem.h"
 
 ParticleSystem::ParticleSystem() :
-    m_numParticles(100)
+    m_numParticles(100),
+    m_instancer(Instancer())
 {
 }
 
 ParticleSystem::ParticleSystem(UINT numParticles) :
-    m_numParticles(numParticles)
+    m_numParticles(numParticles),
+    m_instancer(Instancer())
 {  
 }
 
-void ParticleSystem::LoadParticles(std::vector<InstanceData>& instances)
+void ParticleSystem::LoadParticles()
 {
 	// initializes all the particles
 	float spacing = 0.3f;
@@ -30,7 +32,7 @@ void ParticleSystem::LoadParticles(std::vector<InstanceData>& instances)
         i++;
     }
     
-    instances.resize(NUM_PARTICLES);
+    m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
 float Poly6(float r2, float h) {
@@ -106,7 +108,7 @@ void ParticleSystem::SolveConstraints(float dist, float distSquared) {
     }
 }
 
-void ParticleSystem::Update(float dt, std::vector<InstanceData>& instances) {
+void ParticleSystem::Update(float dt) {
     if (dt <= 0.0f || dt > 0.1f) return;
 
 	const float dist = 1.0f;
@@ -170,7 +172,11 @@ void ParticleSystem::Update(float dt, std::vector<InstanceData>& instances) {
 		}
 	}
 
-	// push to instances vector
+	UpdateInstances();
+}
+
+void ParticleSystem::UpdateInstances() {
+    // push to instances vector
 	for (int i = 0; i < NUM_PARTICLES; i++) {
         XMMATRIX mat = XMMatrixTranslation(
             m_particles[i].position.x,
@@ -178,6 +184,8 @@ void ParticleSystem::Update(float dt, std::vector<InstanceData>& instances) {
             m_particles[i].position.z
         );
 
-        XMStoreFloat4x4(&instances[i].worldMatrix, mat);
+        XMStoreFloat4x4(&m_instancer.m_instances[i].worldMatrix, mat);
     }
+
+    memcpy(m_instancer.m_pInstanceDataBegin, m_instancer.m_instances.data(), sizeof(InstanceData) * NUM_PARTICLES);
 }

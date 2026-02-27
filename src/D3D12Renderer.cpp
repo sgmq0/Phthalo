@@ -13,7 +13,6 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
 	m_camera(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
-	m_sphere(SphereMesh(0.1f)),
 	m_particleSystem(ParticleSystem(1000))
 {
 }
@@ -21,7 +20,7 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 void D3D12Renderer::OnInit()
 {
 	LoadPipeline();
-	m_particleSystem.LoadParticles(m_instances);
+	m_particleSystem.LoadParticles();
 	LoadAssets();
 }
 
@@ -46,9 +45,8 @@ void D3D12Renderer::OnUpdate()
 	// write per instance data
 	// change this into particles...
 
-	m_particleSystem.Update(dt, m_instances);
+	m_particleSystem.Update(dt);
 
-	memcpy(m_pInstanceDataBegin, m_instances.data(), sizeof(InstanceData) * m_particleSystem.NUM_PARTICLES); // particles!!!
 }
 
 void D3D12Renderer::OnRender()
@@ -161,10 +159,6 @@ void D3D12Renderer::LoadPipeline()
 
 void D3D12Renderer::LoadAssets()
 {
-	// load sphere mesh
-	m_sphere.LoadMesh();
-	m_sphereIndexCount = m_sphere.sphereIndices.size();
-
 	// create one root descriptor visible to vertex shader at b0
 	CD3DX12_ROOT_PARAMETER rootParam;
 	rootParam.InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
@@ -286,7 +280,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the vertex buffer ----------
 	{
-		const UINT vertexBufferSize = m_sphere.sphereVertices.size() * sizeof(SphereMesh::Vertex);
+		const UINT vertexBufferSize = m_particleSystem.m_instancer.m_sphere.sphereVertices.size() * sizeof(SphereMesh::Vertex);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(vertexBufferSize);
@@ -302,7 +296,7 @@ void D3D12Renderer::LoadAssets()
 		UINT8* pVertexDataBegin;
 		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
 		ThrowIfFailed(m_vertexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pVertexDataBegin)));
-		memcpy(pVertexDataBegin, m_sphere.sphereVertices.data(), vertexBufferSize);
+		memcpy(pVertexDataBegin, m_particleSystem.m_instancer.m_sphere.sphereVertices.data(), vertexBufferSize);
 		m_vertexBuffer->Unmap(0, nullptr);
 
 		// init vertex buffer view
@@ -313,7 +307,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the index buffer ----------
 	{
-		const UINT indexBufferSize = m_sphere.sphereIndices.size() * sizeof(UINT32);
+		const UINT indexBufferSize = m_particleSystem.m_instancer.m_sphere.sphereIndices.size() * sizeof(UINT32);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(indexBufferSize);
@@ -329,7 +323,7 @@ void D3D12Renderer::LoadAssets()
 		UINT8* pIndexDataBegin;
 		CD3DX12_RANGE readRange(0, 0);
 		ThrowIfFailed(m_indexBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pIndexDataBegin)));
-		memcpy(pIndexDataBegin, m_sphere.sphereIndices.data(), indexBufferSize);
+		memcpy(pIndexDataBegin, m_particleSystem.m_instancer.m_sphere.sphereIndices.data(), indexBufferSize);
 		m_indexBuffer->Unmap(0, nullptr);
 
 		// init index buffer view
@@ -370,17 +364,17 @@ void D3D12Renderer::LoadAssets()
 			&bufferDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(&m_instanceBuffer)));
+			IID_PPV_ARGS(&m_particleSystem.m_instancer.m_instanceBuffer)));
 
 		// copy instance data to instance buffer
 		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-		ThrowIfFailed(m_instanceBuffer->Map(0, &readRange, 
-			reinterpret_cast<void**>(&m_pInstanceDataBegin)));
+		ThrowIfFailed(m_particleSystem.m_instancer.m_instanceBuffer->Map(0, &readRange, 
+			reinterpret_cast<void**>(&m_particleSystem.m_instancer.m_pInstanceDataBegin)));
 
 		// init instance buffer view
-		m_instanceBufferView.BufferLocation = m_instanceBuffer->GetGPUVirtualAddress();
-		m_instanceBufferView.StrideInBytes = sizeof(InstanceData);
-		m_instanceBufferView.SizeInBytes = instanceBufferSize;
+		m_particleSystem.m_instancer.m_instanceBufferView.BufferLocation = m_particleSystem.m_instancer.m_instanceBuffer->GetGPUVirtualAddress();
+		m_particleSystem.m_instancer.m_instanceBufferView.StrideInBytes = sizeof(InstanceData);
+		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
 	// ---------- synchronization objects, fences and such ----------
@@ -436,10 +430,10 @@ void D3D12Renderer::PopulateCommandList()
 
 	// indexed draw
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_instanceBufferView };
+	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
 	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
