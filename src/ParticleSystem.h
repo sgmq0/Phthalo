@@ -13,6 +13,9 @@ public:
     void LoadParticles();
     void Update(float dt);
     void UpdateInstances();
+
+    float ComputeDensityConstraint(int i, float radius);
+    XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
     void SolveConstraints(float dist, float distSquared);
 
     UINT m_numParticles = 100;

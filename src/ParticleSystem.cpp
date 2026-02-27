@@ -35,57 +35,119 @@ void ParticleSystem::LoadParticles()
     m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
-float Poly6(float r2, float h) {
-    float h2 = h * h;
-    if (r2 >= h2) return 0.0f;
-    float x = h2 - r2;
-    return (315.0f / (64.0f * XM_PI * pow(h, 9))) * x * x * x;
+XMFLOAT3 SubtractFloat3(XMFLOAT3 v1, XMFLOAT3 v2) {
+    return XMFLOAT3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
 }
 
-XMFLOAT3 SpikyGradient(XMFLOAT3 ri, XMFLOAT3 rj, float h) {
-    float dx = ri.x - rj.x;
-    float dy = ri.y - rj.y;
-    float dz = ri.z - rj.z;
-    float r = sqrt(dx*dx + dy*dy + dz*dz);
-    if (r < 1e-6f || r >= h) return {0, 0, 0};
-    float coeff = -45.0f / (XM_PI * pow(h, 6)) * (h - r) * (h - r) / r;
-    return { coeff * dx, coeff * dy, coeff * dz };
+float SquaredNorm(XMFLOAT3 vec) {
+    float squared = vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
+    return squared;
+}
+
+float Poly6(XMFLOAT3 r, float h) {
+    const float coeff = 315.0 / (64.0 * XM_PI);
+
+    float h2 = h * h;
+    float r2 = SquaredNorm(r);
+
+    if (r2 > h2) {
+        return 0.0;
+    }
+
+    float h9 = pow(h, 9);
+    float diff = h2 - r2;
+    float diff3 = diff * diff * diff;
+
+    return (coeff / h9) * diff3;
+}
+
+
+XMFLOAT3 SpikyGradient(XMFLOAT3 r, float h) {
+    float coeff = 45.0f / XM_PI;
+
+    float norm = sqrt(r.x*r.x + r.y*r.y + r.z*r.z);
+
+    if (norm > h) {
+        return XMFLOAT3(0.0, 0.0, 0.0);
+    }
+
+    float h6 = pow(h, 6);
+    float diff = h - norm;
+    float diff2 = diff * diff;
+
+    float times = (coeff / (h6 * max(norm, 1e-24f))) * diff2;
+    XMFLOAT3 result = XMFLOAT3(-r.x * times, -r.y * times, -r.z * times);
+    return result;
+}
+
+float ParticleSystem::ComputeDensityConstraint(int i, float radius) {
+    Particle p_target = m_particles[i];
+
+    float density = 0.0;
+    for (int j : p_target.neighbors) {
+        Particle p = m_particles[j];
+
+        XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
+        density += Poly6(pos, radius);
+    }
+
+    return density;
+}
+
+XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, float radius) {
+    Particle p_target = m_particles[i];
+
+    if (i == j) {
+        XMFLOAT3 sum = XMFLOAT3(0.0, 0.0, 0.0);
+        for (int neighbor : m_particles[i].neighbors) {
+            Particle p = m_particles[neighbor];
+
+            XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
+            XMFLOAT3 grad = SpikyGradient(pos, radius);
+            sum.x += grad.x;
+            sum.y += grad.y;
+            sum.z += grad.z;
+        }
+
+        XMFLOAT3 result = XMFLOAT3(sum.x / density, sum.y / density, sum.z / density);
+        return result;
+    } else {
+        Particle p = m_particles[j];
+
+        XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
+        XMFLOAT3 grad = SpikyGradient(pos, radius);
+        return XMFLOAT3(-grad.x, -grad.y, -grad.z);
+    }
 }
 
 void ParticleSystem::SolveConstraints(float dist, float distSquared) {
-    const float rho0    = 10.0f;
-    const float epsilon = 1000.0f;
-    const int   iters   = 3;
+    const float rho_0    = 10.0f;       // rest density
+    const float radius   = dist;
+    const float epsilon  = 1000.0f;
+    const int iterations = 3;
 
-    for (int iter = 0; iter < iters; iter++) {
+    for (int iter = 0; iter < iterations; iter++) {
 
-        // compute lambda for each particle
+        // for all particles, calculate lambda_i
         for (int i = 0; i < NUM_PARTICLES; i++) {
-            // estimate density via Poly6
-            //float rho = Poly6(0.0f, dist);  // self contribution
-			float rho = rho0;
+            
+            // estimate density with Poly6
+            float rho_i = ComputeDensityConstraint(i, radius);
 
+            float constraint = (rho_i / rho_0) - 1.0; // numerator
+
+            float denominator = 0.0;
             for (int j : m_particles[i].neighbors) {
-                float dx = m_particles[i].predictedPosition.x - m_particles[j].predictedPosition.x;
-                float dy = m_particles[i].predictedPosition.y - m_particles[j].predictedPosition.y;
-                float dz = m_particles[i].predictedPosition.z - m_particles[j].predictedPosition.z;
-                rho += Poly6(dx*dx + dy*dy + dz*dz, dist);
+                XMFLOAT3 gradConstraint = ComputeGradiantConstraint(i, j, rho_0, radius);
+                denominator += SquaredNorm(gradConstraint);
             }
 
-            // density constraint C_i = rho/rho0 - 1
-            float C = rho / rho0 - 1.0f;
-
-            // sum of squared gradients for denominator
-            float sumGrad2 = 0.0f;
-            for (int n = 0; n < m_particles[i].neighbors.size(); n++) {
-                int j = m_particles[i].neighbors[n];
-                XMFLOAT3 grad = SpikyGradient(m_particles[i].predictedPosition, m_particles[j].predictedPosition, dist);
-                float g = (grad.x*grad.x + grad.y*grad.y + grad.z*grad.z) / rho0;
-                sumGrad2 += g;
-            }
-
-            m_particles[i].lambda = -C / (sumGrad2 + epsilon);
+            // add an epislon value for relaxation
+            denominator += epsilon;
+            m_particles[i].lambda = -constraint / denominator;
         }
+
+        // TODO: for all particles, calculate delta p
 
         // compute and apply delta p
         std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
@@ -93,10 +155,11 @@ void ParticleSystem::SolveConstraints(float dist, float distSquared) {
 		for (int i = 0; i < NUM_PARTICLES; i++) {
 			for (int j : m_particles[i].neighbors) {
 				float w = m_particles[i].lambda + m_particles[j].lambda;
-				XMFLOAT3 grad = SpikyGradient(m_particles[i].predictedPosition, m_particles[j].predictedPosition, dist);
-				deltas[i].x += w * grad.x / rho0;
-				deltas[i].y += w * grad.y / rho0;
-				deltas[i].z += w * grad.z / rho0;
+                XMFLOAT3 pos = SubtractFloat3(m_particles[i].predictedPosition, m_particles[j].predictedPosition);
+				XMFLOAT3 grad = SpikyGradient(pos, radius);
+				deltas[i].x += w * grad.x / rho_0;
+				deltas[i].y += w * grad.y / rho_0;
+				deltas[i].z += w * grad.z / rho_0;
 			}
 		}
 

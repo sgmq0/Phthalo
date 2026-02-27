@@ -31,6 +31,7 @@ struct Particle {
     XMFLOAT3 position;
     XMFLOAT3 predictedPosition;
     XMFLOAT3 velocity;
+    float density;
     float lambda;
     std::vector<int> neighbors;
 };
