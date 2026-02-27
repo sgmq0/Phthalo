@@ -85,9 +85,6 @@ private:
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
 
-    void UpdateParticles(float dt);
-    void SolveConstraints(float dist, float distSquared);
-
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
     void WaitForGPU();

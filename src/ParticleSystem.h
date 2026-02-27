@@ -9,7 +9,7 @@ public:
     ParticleSystem(UINT numParticles);
 
     void LoadParticles(std::vector<InstanceData>& instances);
-    void UpdateParticles(float dt);
+    void Update(float dt, std::vector<InstanceData>& instances);
     void SolveConstraints(float dist, float distSquared);
 
     UINT m_numParticles = 100;
