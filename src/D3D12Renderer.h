@@ -3,6 +3,7 @@
 #include "DXApplication.h"
 #include "Camera.h"
 #include "SphereMesh.h"
+#include "ParticleSystem.h"
 
 using namespace DirectX;
 
@@ -84,7 +85,6 @@ private:
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
 
-    void LoadParticles();
     void UpdateParticles(float dt);
     void SolveConstraints(float dist, float distSquared);
 
@@ -108,11 +108,6 @@ private:
     SphereMesh m_sphere;
     size_t m_sphereIndexCount;
 
-    // just stores the positions of the sphere instances....
-    struct InstanceData {
-        XMFLOAT4X4 worldMatrix;
-    };
-
     ComPtr<ID3D12Resource> m_instanceBuffer;
     D3D12_VERTEX_BUFFER_VIEW m_instanceBufferView;
     UINT8* m_pInstanceDataBegin = nullptr;
@@ -120,16 +115,7 @@ private:
     std::vector<InstanceData> m_instances;
 
     // ----- actual particle sim stuff -----
-    struct Particle {
-        XMFLOAT3 position;
-        XMFLOAT3 predictedPosition;
-        XMFLOAT3 velocity;
-        float lambda;
-        std::vector<int> neighbors;
-    };
-    
-    static const UINT NUM_PARTICLES = 1000;
-    Particle m_particles[NUM_PARTICLES];
+    ParticleSystem m_particleSystem;
 
     // ----- controls -----
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }

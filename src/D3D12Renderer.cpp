@@ -13,14 +13,16 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
 	m_camera(XMFLOAT3(0.0f, 0.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
-	m_sphere(SphereMesh(0.1f))
+	m_sphere(SphereMesh(0.1f)),
+	m_particleSystem(ParticleSystem(1000))
 {
 }
 
 void D3D12Renderer::OnInit()
 {
 	LoadPipeline();
-	LoadParticles();
+	//LoadParticles();
+	m_particleSystem.LoadParticles(m_instances);
 	LoadAssets();
 }
 
@@ -47,7 +49,7 @@ void D3D12Renderer::OnUpdate()
 
 	UpdateParticles(dt);
 
-	memcpy(m_pInstanceDataBegin, m_instances.data(), sizeof(InstanceData) * NUM_PARTICLES); // particles!!!
+	memcpy(m_pInstanceDataBegin, m_instances.data(), sizeof(InstanceData) * m_particleSystem.NUM_PARTICLES); // particles!!!
 }
 
 void D3D12Renderer::OnRender()
@@ -158,26 +160,6 @@ void D3D12Renderer::LoadPipeline()
 }
 
 
-void D3D12Renderer::LoadParticles()
-{
-	float spacing = 0.3f;
-    int perAxis = (int)cbrt(NUM_PARTICLES);
-    int i = 0;
-    for (int x = 0; x < perAxis; x++)
-    for (int y = 0; y < perAxis; y++)
-    for (int z = 0; z < perAxis; z++) {
-        if (i >= NUM_PARTICLES) break;
-        m_particles[i].position = {
-            (x - perAxis/2.0f) * spacing,
-            y * spacing + 1.0f,   // start above floor
-            (z - perAxis/2.0f) * spacing
-        };
-        m_particles[i].velocity = {0, 0, 0};
-        i++;
-    }
-    m_instances.resize(NUM_PARTICLES);
-}
-
 float Poly6(float r2, float h) {
     float h2 = h * h;
     if (r2 >= h2) return 0.0f;
@@ -203,15 +185,15 @@ void D3D12Renderer::SolveConstraints(float dist, float distSquared) {
     for (int iter = 0; iter < iters; iter++) {
 
         // compute lambda for each particle
-        for (int i = 0; i < NUM_PARTICLES; i++) {
+        for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
             // estimate density via Poly6
             //float rho = Poly6(0.0f, dist);  // self contribution
 			float rho = rho0;
 
-            for (int j : m_particles[i].neighbors) {
-                float dx = m_particles[i].predictedPosition.x - m_particles[j].predictedPosition.x;
-                float dy = m_particles[i].predictedPosition.y - m_particles[j].predictedPosition.y;
-                float dz = m_particles[i].predictedPosition.z - m_particles[j].predictedPosition.z;
+            for (int j : m_particleSystem.m_particles[i].neighbors) {
+                float dx = m_particleSystem.m_particles[i].predictedPosition.x - m_particleSystem.m_particles[j].predictedPosition.x;
+                float dy = m_particleSystem.m_particles[i].predictedPosition.y - m_particleSystem.m_particles[j].predictedPosition.y;
+                float dz = m_particleSystem.m_particles[i].predictedPosition.z - m_particleSystem.m_particles[j].predictedPosition.z;
                 rho += Poly6(dx*dx + dy*dy + dz*dz, dist);
             }
 
@@ -220,33 +202,33 @@ void D3D12Renderer::SolveConstraints(float dist, float distSquared) {
 
             // sum of squared gradients for denominator
             float sumGrad2 = 0.0f;
-            for (int n = 0; n < m_particles[i].neighbors.size(); n++) {
-                int j = m_particles[i].neighbors[n];
-                XMFLOAT3 grad = SpikyGradient(m_particles[i].predictedPosition, m_particles[j].predictedPosition, dist);
+            for (int n = 0; n < m_particleSystem.m_particles[i].neighbors.size(); n++) {
+                int j = m_particleSystem.m_particles[i].neighbors[n];
+                XMFLOAT3 grad = SpikyGradient(m_particleSystem.m_particles[i].predictedPosition, m_particleSystem.m_particles[j].predictedPosition, dist);
                 float g = (grad.x*grad.x + grad.y*grad.y + grad.z*grad.z) / rho0;
                 sumGrad2 += g;
             }
 
-            m_particles[i].lambda = -C / (sumGrad2 + epsilon);
+            m_particleSystem.m_particles[i].lambda = -C / (sumGrad2 + epsilon);
         }
 
         // compute and apply delta p
-        std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
+        std::vector<XMFLOAT3> deltas(m_particleSystem.NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
 
-		for (int i = 0; i < NUM_PARTICLES; i++) {
-			for (int j : m_particles[i].neighbors) {
-				float w = m_particles[i].lambda + m_particles[j].lambda;
-				XMFLOAT3 grad = SpikyGradient(m_particles[i].predictedPosition, m_particles[j].predictedPosition, dist);
+		for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
+			for (int j : m_particleSystem.m_particles[i].neighbors) {
+				float w = m_particleSystem.m_particles[i].lambda + m_particleSystem.m_particles[j].lambda;
+				XMFLOAT3 grad = SpikyGradient(m_particleSystem.m_particles[i].predictedPosition, m_particleSystem.m_particles[j].predictedPosition, dist);
 				deltas[i].x += w * grad.x / rho0;
 				deltas[i].y += w * grad.y / rho0;
 				deltas[i].z += w * grad.z / rho0;
 			}
 		}
 
-		for (int i = 0; i < NUM_PARTICLES; i++) {
-			m_particles[i].predictedPosition.x += deltas[i].x;
-			m_particles[i].predictedPosition.y += deltas[i].y;
-			m_particles[i].predictedPosition.z += deltas[i].z;
+		for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
+			m_particleSystem.m_particles[i].predictedPosition.x += deltas[i].x;
+			m_particleSystem.m_particles[i].predictedPosition.y += deltas[i].y;
+			m_particleSystem.m_particles[i].predictedPosition.z += deltas[i].z;
 		}
     }
 }
@@ -258,70 +240,70 @@ void D3D12Renderer::UpdateParticles(float dt)
 	const float dist = 1.0f;
 	const float distSquared = dist * dist;
 
-	for (int i = 0; i < NUM_PARTICLES; i++) {
+	for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
 
 		// apply forces
-		m_particles[i].velocity.y += -9.8f * dt;
+		m_particleSystem.m_particles[i].velocity.y += -9.8f * dt;
 
 		// predict position
-		m_particles[i].predictedPosition.x = m_particles[i].position.x + dt * m_particles[i].velocity.x;
-		m_particles[i].predictedPosition.y = m_particles[i].position.y + dt * m_particles[i].velocity.y;
-		m_particles[i].predictedPosition.z = m_particles[i].position.z + dt * m_particles[i].velocity.z;
+		m_particleSystem.m_particles[i].predictedPosition.x = m_particleSystem.m_particles[i].position.x + dt * m_particleSystem.m_particles[i].velocity.x;
+		m_particleSystem.m_particles[i].predictedPosition.y = m_particleSystem.m_particles[i].position.y + dt * m_particleSystem.m_particles[i].velocity.y;
+		m_particleSystem.m_particles[i].predictedPosition.z = m_particleSystem.m_particles[i].position.z + dt * m_particleSystem.m_particles[i].velocity.z;
     }
 
 	// find neighbors
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-		m_particles[i].neighbors.clear();
+	for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
+		m_particleSystem.m_particles[i].neighbors.clear();
 	}
 
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-		for (int j = i + 1; j < NUM_PARTICLES; j++) {
-			float dx = m_particles[i].predictedPosition.x - m_particles[j].predictedPosition.x;
-			float dy = m_particles[i].predictedPosition.y - m_particles[j].predictedPosition.y;
-			float dz = m_particles[i].predictedPosition.z - m_particles[j].predictedPosition.z;
+	for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
+		for (int j = i + 1; j < m_particleSystem.NUM_PARTICLES; j++) {
+			float dx = m_particleSystem.m_particles[i].predictedPosition.x - m_particleSystem.m_particles[j].predictedPosition.x;
+			float dy = m_particleSystem.m_particles[i].predictedPosition.y - m_particleSystem.m_particles[j].predictedPosition.y;
+			float dz = m_particleSystem.m_particles[i].predictedPosition.z - m_particleSystem.m_particles[j].predictedPosition.z;
 			float dist2 = dx*dx + dy*dy + dz*dz;
 
 			if (dist2 < distSquared) {
-				m_particles[i].neighbors.push_back(j);
-				m_particles[j].neighbors.push_back(i);
+				m_particleSystem.m_particles[i].neighbors.push_back(j);
+				m_particleSystem.m_particles[j].neighbors.push_back(i);
 			}
 		}
 	}
 
 	// calculations for all particles
-	SolveConstraints(dist, distSquared);
+	// SolveConstraints(dist, distSquared);
 
-	// update positions and velocity
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-		if (m_particles[i].predictedPosition.y < 0.0f) {
-			m_particles[i].predictedPosition.y = 0.0f;
-		}
+	// // update positions and velocity
+	// for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.y < 0.0f) {
+	// 		m_particleSystem.m_particles[i].predictedPosition.y = 0.0f;
+	// 	}
 
-		const float boxMin = -2.0f;
-		const float boxMax =  2.0f;
+	// 	const float boxMin = -2.0f;
+	// 	const float boxMax =  2.0f;
 
-		if (m_particles[i].predictedPosition.x < boxMin) { m_particles[i].predictedPosition.x = boxMin; }
-		if (m_particles[i].predictedPosition.x > boxMax) { m_particles[i].predictedPosition.x = boxMax; }
-		if (m_particles[i].predictedPosition.y < boxMin) { m_particles[i].predictedPosition.y = boxMin; }
-		if (m_particles[i].predictedPosition.z < boxMin) { m_particles[i].predictedPosition.z = boxMin; }
-		if (m_particles[i].predictedPosition.z > boxMax) { m_particles[i].predictedPosition.z = boxMax; }
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.x < boxMin) { m_particleSystem.m_particles[i].predictedPosition.x = boxMin; }
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.x > boxMax) { m_particleSystem.m_particles[i].predictedPosition.x = boxMax; }
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.y < boxMin) { m_particleSystem.m_particles[i].predictedPosition.y = boxMin; }
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.z < boxMin) { m_particleSystem.m_particles[i].predictedPosition.z = boxMin; }
+	// 	if (m_particleSystem.m_particles[i].predictedPosition.z > boxMax) { m_particleSystem.m_particles[i].predictedPosition.z = boxMax; }
 
-		m_particles[i].velocity.x = (m_particles[i].predictedPosition.x - m_particles[i].position.x) / dt;
-		m_particles[i].velocity.y = (m_particles[i].predictedPosition.y - m_particles[i].position.y) / dt;
-		m_particles[i].velocity.z = (m_particles[i].predictedPosition.z - m_particles[i].position.z) / dt;
-		m_particles[i].position = m_particles[i].predictedPosition;
+	// 	m_particleSystem.m_particles[i].velocity.x = (m_particleSystem.m_particles[i].predictedPosition.x - m_particleSystem.m_particles[i].position.x) / dt;
+	// 	m_particleSystem.m_particles[i].velocity.y = (m_particleSystem.m_particles[i].predictedPosition.y - m_particleSystem.m_particles[i].position.y) / dt;
+	// 	m_particleSystem.m_particles[i].velocity.z = (m_particleSystem.m_particles[i].predictedPosition.z - m_particleSystem.m_particles[i].position.z) / dt;
+	// 	m_particleSystem.m_particles[i].position = m_particleSystem.m_particles[i].predictedPosition;
 
-		if (m_particles[i].position.y < 0.0f) {
-			m_particles[i].velocity.y *= -0.3f; // dampen bounce
-		}
-	}
+	// 	if (m_particleSystem.m_particles[i].position.y < 0.0f) {
+	// 		m_particleSystem.m_particles[i].velocity.y *= -0.3f; // dampen bounce
+	// 	}
+	// }
 
 	// push to instances vector
-	for (int i = 0; i < NUM_PARTICLES; i++) {
+	for (int i = 0; i < m_particleSystem.NUM_PARTICLES; i++) {
         XMMATRIX mat = XMMatrixTranslation(
-            m_particles[i].position.x,
-            m_particles[i].position.y,
-            m_particles[i].position.z
+            m_particleSystem.m_particles[i].position.x,
+            m_particleSystem.m_particles[i].position.y,
+            m_particleSystem.m_particles[i].position.z
         );
 
         XMStoreFloat4x4(&m_instances[i].worldMatrix, mat);
@@ -549,7 +531,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the instancing buffer ----------
 	{
-		const UINT instanceBufferSize = NUM_PARTICLES * sizeof(InstanceData);
+		const UINT instanceBufferSize = m_particleSystem.NUM_PARTICLES * sizeof(InstanceData);
 
 		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(instanceBufferSize);
@@ -628,7 +610,7 @@ void D3D12Renderer::PopulateCommandList()
 	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_instanceBufferView };
 	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, NUM_PARTICLES, 0, 0, 0);
+	m_commandList->DrawIndexedInstanced(m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(

@@ -19,3 +19,18 @@
 #pragma comment(lib, "d3d12.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
+
+using namespace DirectX;
+using Microsoft::WRL::ComPtr;
+
+struct InstanceData {
+    XMFLOAT4X4 worldMatrix;
+};
+
+struct Particle {
+    XMFLOAT3 position;
+    XMFLOAT3 predictedPosition;
+    XMFLOAT3 velocity;
+    float lambda;
+    std::vector<int> neighbors;
+};
