@@ -120,63 +120,20 @@ XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, 
     }
 }
 
-void ParticleSystem::SolveConstraints(float dist, float distSquared) {
-    const float rho_0    = 10.0f;       // rest density
-    const float radius   = dist;
-    const float epsilon  = 1000.0f;
-    const int iterations = 3;
-
-    for (int iter = 0; iter < iterations; iter++) {
-
-        // for all particles, calculate lambda_i
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-            
-            // estimate density with Poly6
-            float rho_i = ComputeDensityConstraint(i, radius);
-
-            float constraint = (rho_i / rho_0) - 1.0; // numerator
-
-            float denominator = 0.0;
-            for (int j : m_particles[i].neighbors) {
-                XMFLOAT3 gradConstraint = ComputeGradiantConstraint(i, j, rho_0, radius);
-                denominator += SquaredNorm(gradConstraint);
-            }
-
-            // add an epislon value for relaxation
-            denominator += epsilon;
-            m_particles[i].lambda = -constraint / denominator;
-        }
-
-        // TODO: for all particles, calculate delta p
-
-        // compute and apply delta p
-        std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
-
-		for (int i = 0; i < NUM_PARTICLES; i++) {
-			for (int j : m_particles[i].neighbors) {
-				float w = m_particles[i].lambda + m_particles[j].lambda;
-                XMFLOAT3 pos = SubtractFloat3(m_particles[i].predictedPosition, m_particles[j].predictedPosition);
-				XMFLOAT3 grad = SpikyGradient(pos, radius);
-				deltas[i].x += w * grad.x / rho_0;
-				deltas[i].y += w * grad.y / rho_0;
-				deltas[i].z += w * grad.z / rho_0;
-			}
-		}
-
-		for (int i = 0; i < NUM_PARTICLES; i++) {
-			m_particles[i].predictedPosition.x += deltas[i].x;
-			m_particles[i].predictedPosition.y += deltas[i].y;
-			m_particles[i].predictedPosition.z += deltas[i].z;
-		}
-    }
-}
 
 void ParticleSystem::Update(float dt) {
     if (dt <= 0.0f || dt > 0.1f) return;
 
-	const float dist = 1.0f;
-	const float distSquared = dist * dist;
+	const float radius   = 1.0f;
+	const float distSquared = radius * radius;
+    const float rho_0    = 10.0f;       // rest density
+    const float epsilon  = 1000.0f;
+    const float damping  = 0.999f;
+    const float boxSize  = 3.0f;
+    const float restitution = 0.3f;
+    const int iterations = 3;
 
+    // ------------ STEP 1: PREDICT POSITIONS --------------
 	for (int i = 0; i < NUM_PARTICLES; i++) {
 
 		// apply forces
@@ -188,11 +145,12 @@ void ParticleSystem::Update(float dt) {
 		m_particles[i].predictedPosition.z = m_particles[i].position.z + dt * m_particles[i].velocity.z;
     }
 
-	// find neighbors
+	// ------------ STEP 2: FIND NEIGHBORS --------------
 	for (int i = 0; i < NUM_PARTICLES; i++) {
 		m_particles[i].neighbors.clear();
 	}
 
+    
 	for (int i = 0; i < NUM_PARTICLES; i++) {
 		for (int j = i + 1; j < NUM_PARTICLES; j++) {
 			float dx = m_particles[i].predictedPosition.x - m_particles[j].predictedPosition.x;
@@ -208,31 +166,97 @@ void ParticleSystem::Update(float dt) {
 	}
 
 	// calculations for all particles
-	SolveConstraints(dist, distSquared);
+    for (int iter = 0; iter < iterations; iter++) {
+
+        // for all particles, calculate lambda_i
+        for (int i = 0; i < NUM_PARTICLES; i++) {
+            
+            // ------------ STEP 3 : COMPUTE DENSITIES rho_i --------------
+            float rho_i = ComputeDensityConstraint(i, radius);
+
+            // ------------ STEP 4 : COMPUTE LAMBDA --------------
+            float constraint = (rho_i / rho_0) - 1.0; // numerator
+            float denominator = 0.0;
+            for (int j : m_particles[i].neighbors) {
+                XMFLOAT3 gradConstraint = ComputeGradiantConstraint(i, j, rho_0, radius);
+                denominator += SquaredNorm(gradConstraint);
+            }
+
+            // add an epislon value for relaxation
+            denominator += epsilon;
+            m_particles[i].lambda = -constraint / denominator;
+        }
+
+        // ------------ STEP 5 : COMPUTE DENSITIES DELTA RHO --------------
+        std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
+
+        for (int i = 0; i < NUM_PARTICLES; i++) {
+            Particle p = m_particles[i];
+
+            // artifical tensile pressure correction constants
+            const float corr_n = 4.0;
+            const float corr_h = 0.30;
+            const float corr_k = 1e-04;
+            const float corr_w = Poly6(XMFLOAT3(corr_h * radius, 0.0, 0.0), radius);
+
+            float sum_x = 0.0;
+            float sum_y = 0.0;
+            float sum_z = 0.0;
+
+            for (int j : p.neighbors) {
+                Particle p_neighbor = m_particles[j];
+
+                // artificial tensile pressure correction 
+                const float poly = Poly6(SubtractFloat3(p.position, p_neighbor.position), radius);
+                const float ratio = poly / corr_w;
+                const float corr_coeff = -corr_k * pow(ratio, corr_n);
+                const float coeff = p.lambda + p_neighbor.lambda + corr_coeff;
+
+                XMFLOAT3 sum = SpikyGradient(SubtractFloat3(p.position, p_neighbor.position), radius);
+                sum_x += sum.x * coeff;
+                sum_y += sum.y * coeff;
+                sum_z += sum.z * coeff;
+            }
+
+            float rho_coeff = 1.0 / rho_0;
+            XMFLOAT3 sum_vec = XMFLOAT3(rho_coeff * sum_x, rho_coeff * sum_y, rho_coeff * sum_z);
+
+            // solve for delta rho
+            deltas[i].x += sum_vec.x;
+            deltas[i].y += sum_vec.y;
+            deltas[i].z += sum_vec.z;
+        }
+
+        // ------------ STEP 6 : APPLY DELTA RHO --------------
+		for (int i = 0; i < NUM_PARTICLES; i++) {
+			m_particles[i].predictedPosition.x += deltas[i].x;
+			m_particles[i].predictedPosition.y += deltas[i].y;
+			m_particles[i].predictedPosition.z += deltas[i].z;
+		}
+    }
 
 	// update positions and velocity
 	for (int i = 0; i < NUM_PARTICLES; i++) {
-		if (m_particles[i].predictedPosition.y < 0.0f) {
-			m_particles[i].predictedPosition.y = 0.0f;
-		}
+        XMFLOAT3 pred = m_particles[i].predictedPosition;
 
-		const float boxMin = -2.0f;
-		const float boxMax =  2.0f;
+        // constraints
+        // if (pred.x <= -boxSize) {
+        //     m_particles[i].predictedPosition.x = -boxSize;
+        //     m_particles[i].velocity.x *= -1.0f;
+        //     m_particles[i].velocity.y *= -1.0f;
+        //     m_particles[i].velocity.z *= -1.0f;
+        // }
+        m_particles[i].predictedPosition.x = max(m_particles[i].predictedPosition.x, -boxSize); 
+        m_particles[i].predictedPosition.x = min(m_particles[i].predictedPosition.x, boxSize);
+        m_particles[i].predictedPosition.y = max(m_particles[i].predictedPosition.y, 0.0f); 
+        m_particles[i].predictedPosition.y = min(m_particles[i].predictedPosition.y, 8.0f);
+        m_particles[i].predictedPosition.z = max(m_particles[i].predictedPosition.z, -boxSize); 
+        m_particles[i].predictedPosition.z = min(m_particles[i].predictedPosition.z, boxSize);
 
-		if (m_particles[i].predictedPosition.x < boxMin) { m_particles[i].predictedPosition.x = boxMin; }
-		if (m_particles[i].predictedPosition.x > boxMax) { m_particles[i].predictedPosition.x = boxMax; }
-		if (m_particles[i].predictedPosition.y < boxMin) { m_particles[i].predictedPosition.y = boxMin; }
-		if (m_particles[i].predictedPosition.z < boxMin) { m_particles[i].predictedPosition.z = boxMin; }
-		if (m_particles[i].predictedPosition.z > boxMax) { m_particles[i].predictedPosition.z = boxMax; }
-
-		m_particles[i].velocity.x = (m_particles[i].predictedPosition.x - m_particles[i].position.x) / dt;
-		m_particles[i].velocity.y = (m_particles[i].predictedPosition.y - m_particles[i].position.y) / dt;
-		m_particles[i].velocity.z = (m_particles[i].predictedPosition.z - m_particles[i].position.z) / dt;
+        m_particles[i].velocity.x = damping * (m_particles[i].predictedPosition.x - m_particles[i].position.x) / dt;
+		m_particles[i].velocity.y = damping * (m_particles[i].predictedPosition.y - m_particles[i].position.y) / dt;
+		m_particles[i].velocity.z = damping * (m_particles[i].predictedPosition.z - m_particles[i].position.z) / dt;
 		m_particles[i].position = m_particles[i].predictedPosition;
-
-		if (m_particles[i].position.y < 0.0f) {
-			m_particles[i].velocity.y *= -0.3f; // dampen bounce
-		}
 	}
 
 	UpdateInstances();

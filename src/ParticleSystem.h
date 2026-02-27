@@ -16,7 +16,6 @@ public:
 
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
-    void SolveConstraints(float dist, float distSquared);
 
     UINT m_numParticles = 100;
     static const UINT NUM_PARTICLES = 1000;
