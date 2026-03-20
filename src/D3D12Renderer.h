@@ -117,11 +117,6 @@ private:
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
 
     // ----- compute stuff -----
-    ComPtr<ID3D12Resource> m_computeTestBuffer; 
-    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
-    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
-	ComPtr<ID3DBlob> m_computeTestShaderBlob;
-
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
     void ReadbackCompute();

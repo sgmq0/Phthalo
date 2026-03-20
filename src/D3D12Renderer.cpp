@@ -51,7 +51,7 @@ void D3D12Renderer::OnUpdate()
     ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
     ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
 
-	// run the compute
+	// run the computes
 	m_particleSystem.m_instancer.ComputeInstances(
 		m_commandList.Get(),
 		m_commandQueue.Get(),
@@ -352,68 +352,11 @@ void D3D12Renderer::CreateGraphicsPipeline()
 
 void D3D12Renderer::CreateComputePipeline()
 {
-	// 1. initialize root signature
-	CD3DX12_ROOT_PARAMETER params[1];
-    params[0].InitAsUnorderedAccessView(0); // u0 - one constant for now
-
-	CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
-	rootDesc.NumParameters = 1;
-	rootDesc.pParameters = params;
-	rootDesc.NumStaticSamplers = 0;
-	rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-	ComPtr<ID3DBlob> sig, err;
-	ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-	ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(),
-		sig->GetBufferSize(), IID_PPV_ARGS(&m_computeTestRootSignature)));
-
-	// 2. compile shaders
-	ComPtr<ID3DBlob> computeShader;
-	ComPtr<ID3DBlob> computeError;
-	HRESULT hr = D3DCompileFromFile(GetAssetFullPath(L"gridcount.hlsl").c_str(), nullptr, nullptr, "CSGridCount", "cs_5_0", 0, 0, &computeShader, &computeError);
-	if (computeError)
-		OutputDebugStringA((char*)computeError->GetBufferPointer());
-	ThrowIfFailed(hr);
-
-	// 3. create pipeline state
-	D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-	psoDesc.pRootSignature = m_computeTestRootSignature.Get();
-	psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-	ThrowIfFailed(m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_computeTestPipeline)));
-
-	// create compute buffer, put this into createBuffers() later
-	UINT byteSize = m_particleSystem.NUM_PARTICLES * sizeof(XMFLOAT4);
-
-	auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
-		byteSize,
-		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
-	);
-
-	CD3DX12_HEAP_PROPERTIES defaultHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,     
-        &bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_computeTestBuffer)));
-
-	// test: readback the stuff written by the compute shader
-	// auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-	// CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
-	// ThrowIfFailed(m_device->CreateCommittedResource(
-	// 	&readbackHeap,
-	// 	D3D12_HEAP_FLAG_NONE,
-	// 	&readbackDesc,
-	// 	D3D12_RESOURCE_STATE_COPY_DEST,
-	// 	nullptr,
-	// 	IID_PPV_ARGS(&m_computeReadbackBuffer)
-	// ));
-
-	// ---- compute command list ----
-    ThrowIfFailed(m_device->CreateCommandAllocator(
-        D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&m_computeAllocator)));
-    ThrowIfFailed(m_device->CreateCommandList(0,
-        D3D12_COMMAND_LIST_TYPE_COMPUTE,
-        m_computeAllocator.Get(),
-        m_computeTestPipeline.Get(),
-        IID_PPV_ARGS(&m_computeCommandList)));
-    ThrowIfFailed(m_computeCommandList->Close());
+	m_particleSystem.CreateComputePipeline(
+        m_device.Get(),
+        GetAssetFullPath(L"gridcount.hlsl"),
+        m_computeAllocator,
+        m_computeCommandList);
 }
 
 void D3D12Renderer::CreateBuffers()
@@ -494,19 +437,18 @@ void D3D12Renderer::CreateBuffers()
 	// ---------- create the instancing buffer ----------
 	// put this in instancer class
 	m_particleSystem.m_instancer.Init(m_device.Get(), m_particleSystem.NUM_PARTICLES, GetAssetFullPath(L"compute.hlsl"));
-
 }
 
 void D3D12Renderer::DispatchCompute()
 {
     // reset
     ThrowIfFailed(m_computeAllocator->Reset());
-    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_computeTestPipeline.Get()));
+    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_particleSystem.m_computeTestPipeline.Get()));
 
     // set states
-    m_computeCommandList->SetComputeRootSignature(m_computeTestRootSignature.Get());
-    m_computeCommandList->SetPipelineState(m_computeTestPipeline.Get());
-    m_computeCommandList->SetComputeRootUnorderedAccessView(0, m_computeTestBuffer->GetGPUVirtualAddress());
+    m_computeCommandList->SetComputeRootSignature(m_particleSystem.m_computeTestRootSignature.Get());
+    m_computeCommandList->SetPipelineState(m_particleSystem.m_computeTestPipeline.Get());
+    m_computeCommandList->SetComputeRootUnorderedAccessView(0, m_particleSystem.m_computeTestBuffer->GetGPUVirtualAddress());
 
     // dispatch
     m_computeCommandList->Dispatch((m_particleSystem.NUM_PARTICLES + 63) / 64, 1, 1);
@@ -613,21 +555,21 @@ void D3D12Renderer::ReadbackCompute()
 {
     // need a fresh command list to record the copy
     ThrowIfFailed(m_computeAllocator->Reset());
-    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_computeTestPipeline.Get()));
+    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_particleSystem.m_computeTestPipeline.Get()));
 
     // transition compute buffer from UAV -> copy source
     CD3DX12_RESOURCE_BARRIER toCopySrc = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_computeTestBuffer.Get(),
+        m_particleSystem.m_computeTestBuffer.Get(),
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
         D3D12_RESOURCE_STATE_COPY_SOURCE
     );
     m_computeCommandList->ResourceBarrier(1, &toCopySrc);
 
-    m_computeCommandList->CopyResource(m_computeReadbackBuffer.Get(), m_computeTestBuffer.Get());
+    m_computeCommandList->CopyResource(m_computeReadbackBuffer.Get(), m_particleSystem.m_computeTestBuffer.Get());
 
     // transition back so next frame's dispatch can write to it again
     CD3DX12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_computeTestBuffer.Get(),
+        m_particleSystem.m_computeTestBuffer.Get(),
         D3D12_RESOURCE_STATE_COPY_SOURCE,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS
     );
