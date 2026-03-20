@@ -127,7 +127,7 @@ void ParticleSystem::Update(float dt) {
 	const float radius      = 1.0f;
     const float radius2     = radius * radius;
     const float rho_0       = 10.0f;       // rest density
-    const float epsilon     = 1000.0f;
+    const float epsilon     = 100.0f;
     const float damping     = 0.999f;
     const float boxSize     = 3.0f;
     const float restitution = 0.3f;
@@ -166,6 +166,7 @@ void ParticleSystem::Update(float dt) {
 	}
 
 	// calculations for all particles
+    std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
     for (int iter = 0; iter < iterations; iter++) {
 
         // for all particles, calculate lambda_i
@@ -188,7 +189,6 @@ void ParticleSystem::Update(float dt) {
         }
 
         // ------------ STEP 5 : COMPUTE DENSITIES DELTA RHO --------------
-        std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
 
         for (int i = 0; i < NUM_PARTICLES; i++) {
             Particle p = m_particles[i];
@@ -207,12 +207,12 @@ void ParticleSystem::Update(float dt) {
                 Particle p_neighbor = m_particles[j];
 
                 // artificial tensile pressure correction 
-                const float poly = Poly6(SubtractFloat3(p.position, p_neighbor.position), radius);
+                const float poly = Poly6(SubtractFloat3(p.predictedPosition, p_neighbor.predictedPosition), radius);
                 const float ratio = poly / corr_w;
                 const float corr_coeff = -corr_k * pow(ratio, corr_n);
                 const float coeff = p.lambda + p_neighbor.lambda + corr_coeff;
 
-                XMFLOAT3 sum = SpikyGradient(SubtractFloat3(p.position, p_neighbor.position), radius);
+                XMFLOAT3 sum = SpikyGradient(SubtractFloat3(p.predictedPosition, p_neighbor.predictedPosition), radius);
                 sum_x += sum.x * coeff;
                 sum_y += sum.y * coeff;
                 sum_z += sum.z * coeff;
@@ -248,9 +248,9 @@ void ParticleSystem::Update(float dt) {
             XMFLOAT3 velocity = SubtractFloat3(m_particles[j].velocity, m_particles[i].velocity);
 
             float coeff = 1.0f / densities[i];
-            xsph[i].x += val * velocity.x;
-            xsph[i].y += val * velocity.y;
-            xsph[i].z += val * velocity.z;
+            xsph[i].x += coeff * val * velocity.x;
+            xsph[i].y += coeff * val * velocity.y;
+            xsph[i].z += coeff * val * velocity.z;
         }
     }
 
@@ -265,6 +265,12 @@ void ParticleSystem::Update(float dt) {
         pred.y = min(pred.y, 8.0f);
         pred.z = max(pred.z, -boxSize); 
         pred.z = min(pred.z, boxSize);
+
+        // in the finalize loop, after clamping
+        if (pred.y <= 0.0f) m_particles[i].velocity.y = 0.0f;
+        if (pred.y >= 8.0f) m_particles[i].velocity.y = 0.0f;
+        if (abs(pred.x) >= boxSize) m_particles[i].velocity.x = 0.0f;
+        if (abs(pred.z) >= boxSize) m_particles[i].velocity.z = 0.0f;
 
         // update velocity
         m_particles[i].velocity.x = damping * (pred.x - m_particles[i].position.x) / dt;
