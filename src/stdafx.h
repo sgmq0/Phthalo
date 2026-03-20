@@ -35,3 +35,15 @@ struct Particle {
     float lambda;
     std::vector<int> neighbors;
 };
+
+// like particle but used on the GPU
+struct GPUParticle {
+    XMFLOAT3 position;
+    float     _pad0;
+    XMFLOAT3 predictedPosition;
+    float     _pad1;
+    XMFLOAT3 velocity;
+    float     density;
+    float     lambda;
+    float     _pad2[3];
+};

@@ -354,7 +354,7 @@ void D3D12Renderer::LoadAssets()
 
 	// ---------- create the instancing buffer ----------
 	// put this in instancer class
-	m_particleSystem.m_instancer.Init(m_device.Get(), m_particleSystem.NUM_PARTICLES);
+	m_particleSystem.m_instancer.Init(m_device.Get(), m_particleSystem.NUM_PARTICLES, GetAssetFullPath(L"compute.hlsl"));
 
 	// ---------- synchronization objects, fences and such ----------
 	// create fence and wait for the gpu.
