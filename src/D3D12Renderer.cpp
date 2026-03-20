@@ -20,6 +20,7 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 void D3D12Renderer::OnInit()
 {
 	LoadPipeline();
+	LoadCompute();
 	m_particleSystem.LoadParticles();
 	LoadAssets();
 }
@@ -45,6 +46,7 @@ void D3D12Renderer::OnUpdate()
 	// write per instance data
 	// change this into particles...
 
+	// update particle data, and update the instance buffer (which stores positions)
 	m_particleSystem.Update(dt);
 
 }
@@ -154,6 +156,109 @@ void D3D12Renderer::LoadPipeline()
 
 	// also, disable alt+enter full-screen transitions - too jank
 	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
+}
+
+
+void D3D12Renderer::LoadCompute()
+{
+    // --- Root signature: b0 CBV, t0 SRV, u0 UAV ---
+    CD3DX12_DESCRIPTOR_RANGE ranges[2];
+    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0 particles
+    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0 instances
+
+    CD3DX12_ROOT_PARAMETER params[2];
+    params[0].InitAsConstants(1, 0); // b0: numParticles
+    params[1].InitAsDescriptorTable(2, ranges); // t0 + u0
+
+    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(2, params, 0, nullptr,
+        D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> sig, err;
+    ThrowIfFailed(D3D12SerializeRootSignature(&rsDesc,
+        D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+    ThrowIfFailed(m_device->CreateRootSignature(0,
+        sig->GetBufferPointer(), sig->GetBufferSize(),
+        IID_PPV_ARGS(&m_computeRootSignature)));
+
+    // --- Compile compute shader ---
+    ComPtr<ID3DBlob> csBlob;
+    ThrowIfFailed(D3DCompileFromFile(
+        GetAssetFullPath(L"shaders.hlsl").c_str(),
+        nullptr, nullptr,
+        "CSUpdateInstances", "cs_5_0",
+        0, 0, &csBlob, nullptr));
+
+	// 
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_computeRootSignature.Get();
+    psoDesc.CS = CD3DX12_SHADER_BYTECODE(csBlob.Get());
+    ThrowIfFailed(m_device->CreateComputePipelineState(
+        &psoDesc, IID_PPV_ARGS(&m_computePipelineState)));
+
+    // --- Descriptor heap (1 SRV + 1 UAV) ---
+    D3D12_DESCRIPTOR_HEAP_DESC heapDesc = {};
+    heapDesc.NumDescriptors = 2;
+    heapDesc.Type  = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    heapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(m_device->CreateDescriptorHeap(
+        &heapDesc, IID_PPV_ARGS(&m_computeHeap)));
+    m_computeDescriptorSize = m_device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    UINT N = m_particleSystem.NUM_PARTICLES;
+
+    // --- GPU particle buffer ---
+    {
+        CD3DX12_HEAP_PROPERTIES hp(D3D12_HEAP_TYPE_DEFAULT);
+        CD3DX12_RESOURCE_DESC   bd = CD3DX12_RESOURCE_DESC::Buffer(
+            N * sizeof(GPUParticle),
+            D3D12_RESOURCE_FLAG_NONE);
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &hp, D3D12_HEAP_FLAG_NONE, &bd,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr, IID_PPV_ARGS(&m_particleBuffer)));
+    }
+
+    // --- Upload / staging buffer ---
+    {
+        CD3DX12_HEAP_PROPERTIES hp(D3D12_HEAP_TYPE_UPLOAD);
+        CD3DX12_RESOURCE_DESC   bd = CD3DX12_RESOURCE_DESC::Buffer(
+            N * sizeof(GPUParticle));
+        ThrowIfFailed(m_device->CreateCommittedResource(
+            &hp, D3D12_HEAP_FLAG_NONE, &bd,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            nullptr, IID_PPV_ARGS(&m_particleUploadBuffer)));
+    }
+
+    // --- Change instance buffer to UAV (needs flag) ---
+    // The instance buffer was already created earlier in LoadAssets().
+    // You need to add D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS to its
+    // resource desc and put it in DEFAULT heap instead of UPLOAD.
+    // See the note below on this.
+
+    // --- SRV for particle buffer (t0) ---
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.ViewDimension              = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Shader4ComponentMapping    = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Buffer.NumElements         = N;
+    srvDesc.Buffer.StructureByteStride = sizeof(GPUParticle);
+    srvDesc.Buffer.Flags               = D3D12_BUFFER_SRV_FLAG_NONE;
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE srvHandle(
+        m_computeHeap->GetCPUDescriptorHandleForHeapStart(), 0, m_computeDescriptorSize);
+    m_device->CreateShaderResourceView(m_particleBuffer.Get(), &srvDesc, srvHandle);
+
+    // --- UAV for instance buffer (u0) ---
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.ViewDimension              = D3D12_UAV_DIMENSION_BUFFER;
+    uavDesc.Buffer.NumElements         = N;
+    uavDesc.Buffer.StructureByteStride = sizeof(InstanceData);
+
+    CD3DX12_CPU_DESCRIPTOR_HANDLE uavHandle(
+        m_computeHeap->GetCPUDescriptorHandleForHeapStart(), 1, m_computeDescriptorSize);
+    m_device->CreateUnorderedAccessView(
+        m_particleSystem.m_instancer.m_instanceBuffer.Get(),
+        nullptr, &uavDesc, uavHandle);
 }
 
 
