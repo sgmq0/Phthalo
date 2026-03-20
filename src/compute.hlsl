@@ -27,12 +27,13 @@ void CSUpdateInstances(uint3 id : SV_DispatchThreadID) {
 
     float3 pos = particlesIn[i].position;
 
-    float4x4 mat = float4x4(
+    InstanceData result;
+    result.worldMatrix = float4x4(
         1, 0, 0, 0,
         0, 1, 0, 0,
         0, 0, 1, 0,
         pos.x, pos.y, pos.z, 1
     );
 
-    instancesOut[i] = mat;
+    instancesOut[i] = result;
 }

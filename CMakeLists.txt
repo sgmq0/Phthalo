@@ -34,12 +34,17 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 # shader compilation
 # Copy shader file to build directory so D3DCompileFromFile can find it
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders.hlsl
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/shaders.hlsl
-    COMMENT "Copying shaders.hlsl to output directory"
-)
+file(GLOB HLSL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hlsl")
+
+foreach(HLSL_FILE ${HLSL_FILES})
+    get_filename_component(HLSL_NAME ${HLSL_FILE} NAME)
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${HLSL_FILE}
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/${HLSL_NAME}
+        COMMENT "Copying ${HLSL_NAME} to output directory"
+    )
+endforeach()
 
 set_target_properties(${PROJECT_NAME} PROPERTIES
     WIN32_EXECUTABLE TRUE

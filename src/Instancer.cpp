@@ -14,7 +14,7 @@ void Instancer::Init(ID3D12Device* device, UINT numParticles, std::wstring compu
 {
     CreateInstanceBuffer(device, numParticles);
     CreateParticleBuffers(device, numParticles);
-    //CreateComputePipeline(device, numParticles, computePath);
+    CreateComputePipeline(device, numParticles, computePath);
 }
 
 void Instancer::CreateInstanceBuffer(ID3D12Device *device, UINT numParticles)
@@ -73,15 +73,12 @@ void Instancer::CreateParticleBuffers(ID3D12Device *device, UINT numParticles)
 
 void Instancer::CreateComputePipeline(ID3D12Device* device, UINT numParticles, std::wstring computePath)
 {
-    CD3DX12_DESCRIPTOR_RANGE ranges[2];
-    ranges[0].Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0); // t0
-    ranges[1].Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0); // u0
+    CD3DX12_ROOT_PARAMETER params[3];
+    params[0].InitAsConstants(1, 0); // b0: numParticles
+    params[1].InitAsShaderResourceView(0); // t0: particlesIn
+    params[2].InitAsUnorderedAccessView(0); // u0: instancesOut;
 
-    CD3DX12_ROOT_PARAMETER params[2];
-    params[0].InitAsConstants(1, 0);           // b0: numParticles
-    params[1].InitAsDescriptorTable(2, ranges); // t0 + u0
-
-    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(2, params, 0, nullptr,
+    CD3DX12_ROOT_SIGNATURE_DESC rsDesc(3, params, 0, nullptr,
         D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
     ComPtr<ID3DBlob> sig, err;
@@ -91,7 +88,7 @@ void Instancer::CreateComputePipeline(ID3D12Device* device, UINT numParticles, s
         0, sig->GetBufferPointer(), sig->GetBufferSize(),
         IID_PPV_ARGS(&m_computeRootSignature)));
 
-    // compile compute shader
+    //compile compute shader
     ComPtr<ID3DBlob> csBlob, csErr;
     HRESULT hr = D3DCompileFromFile(
         computePath.c_str(), nullptr, nullptr,
