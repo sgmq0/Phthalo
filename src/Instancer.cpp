@@ -28,7 +28,7 @@ void Instancer::CreateInstanceBuffer(ID3D12Device *device, UINT numParticles)
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &bufferDesc,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COMMON,
         nullptr,
         IID_PPV_ARGS(&m_instanceBuffer)));
 
@@ -62,7 +62,7 @@ void Instancer::CreateParticleBuffers(ID3D12Device *device, UINT numParticles)
             &heapProps,
             D3D12_HEAP_FLAG_NONE,
             &bufferDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_COMMON,
             nullptr,
             IID_PPV_ARGS(&m_particleDefaultBuffer)));
     }
