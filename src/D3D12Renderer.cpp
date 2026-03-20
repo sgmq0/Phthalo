@@ -47,10 +47,28 @@ void D3D12Renderer::OnUpdate()
 
 	m_particleSystem.Update(dt);
 
+	static float fpsTimer = 0.0f;
+	fpsTimer += dt;
+	if (fpsTimer >= 0.5f)  // update twice per second so it's readable
+	{
+		char buf[64];
+		sprintf_s(buf, "%.2f ms  |  %.0f fps", dt * 1000.0f, 1.0f / dt);
+		SetCustomWindowText(std::wstring(buf, buf + strlen(buf)).c_str());
+		fpsTimer = 0.0f;
+	}
 }
 
 void D3D12Renderer::OnRender()
 {
+	DispatchCompute();
+
+	static bool readbackDone = false;
+    if (!readbackDone)
+    {
+        ReadbackCompute();
+        readbackDone = true;
+    }
+
 	// add all the rendering commands into our command list...
 	PopulateCommandList();
 
@@ -105,8 +123,12 @@ void D3D12Renderer::LoadPipeline()
 	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
 	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
 	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
 	ThrowIfFailed(m_device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&m_commandQueue)));
+
+	D3D12_COMMAND_QUEUE_DESC computeQueueDesc = {};
+	computeQueueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	computeQueueDesc.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	ThrowIfFailed(m_device->CreateCommandQueue(&computeQueueDesc, IID_PPV_ARGS(&m_computeCommandQueue)));
 
 	// create swap chain
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
@@ -159,6 +181,30 @@ void D3D12Renderer::LoadPipeline()
 
 void D3D12Renderer::LoadAssets()
 {
+	CreateGraphicsPipeline();
+	CreateComputePipeline();
+	CreateBuffers();
+	
+	// ---------- synchronization objects, fences and such ----------
+	// create fence and wait for the gpu.
+	ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
+	m_fenceValues[m_frameIndex]++;
+
+	// create compute fence also
+	ThrowIfFailed(m_device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_computeFence)));
+
+	// create fence event handle for frame synchronization.
+	m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+	if (m_fenceEvent == nullptr)
+	{
+		ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
+	}
+
+	// wait for setup to complete, in this case
+	WaitForGPU();
+}
+
+void D3D12Renderer::CreateGraphicsPipeline() {
 	// create one root descriptor visible to vertex shader at b0
 	CD3DX12_ROOT_PARAMETER rootParam;
 	rootParam.InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
@@ -277,7 +323,9 @@ void D3D12Renderer::LoadAssets()
 	// close it for now because main loop expects it to be
 	// nothing to record yet.
 	ThrowIfFailed(m_commandList->Close());
+}
 
+void D3D12Renderer::CreateBuffers() {
 	// ---------- create the vertex buffer ----------
 	{
 		const UINT vertexBufferSize = m_particleSystem.m_instancer.m_sphere.sphereVertices.size() * sizeof(SphereMesh::Vertex);
@@ -377,20 +425,99 @@ void D3D12Renderer::LoadAssets()
 		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
-	// ---------- synchronization objects, fences and such ----------
-	// create fence and wait for the gpu.
-	ThrowIfFailed(m_device->CreateFence(m_fenceValues[m_frameIndex], D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&m_fence)));
-	m_fenceValues[m_frameIndex]++;
+}
 
-	// create fence event handle for frame synchronization.
-	m_fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
-	if (m_fenceEvent == nullptr)
-	{
-		ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError()));
-	}
+void D3D12Renderer::CreateComputePipeline() {
+	// 1. initialize root signature
+	CD3DX12_ROOT_PARAMETER params[1];
+    params[0].InitAsUnorderedAccessView(0); // u0 - one constant for now
 
-	// wait for setup to complete, in this case
-	WaitForGPU();
+	CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
+	rootDesc.NumParameters = 1;
+	rootDesc.pParameters = params;
+	rootDesc.NumStaticSamplers = 0;
+	rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+	ComPtr<ID3DBlob> sig, err;
+	ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+	ThrowIfFailed(m_device->CreateRootSignature(0, sig->GetBufferPointer(),
+		sig->GetBufferSize(), IID_PPV_ARGS(&m_computeTestRootSignature)));
+
+	// 2. compile shaders
+	ComPtr<ID3DBlob> computeShader;
+	ComPtr<ID3DBlob> computeError;
+	HRESULT hr = D3DCompileFromFile(GetAssetFullPath(L"gridcount.hlsl").c_str(), nullptr, nullptr, "CSGridCount", "cs_5_0", 0, 0, &computeShader, &computeError);
+	if (computeError)
+		OutputDebugStringA((char*)computeError->GetBufferPointer());
+	ThrowIfFailed(hr);
+
+	// 3. create pipeline state
+	D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+	psoDesc.pRootSignature = m_computeTestRootSignature.Get();
+	psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+	ThrowIfFailed(m_device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_computeTestPipeline)));
+
+	// create compute buffer, put this into createBuffers() later
+	UINT byteSize = m_particleSystem.NUM_PARTICLES * sizeof(XMFLOAT4);
+
+	auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
+		byteSize,
+		D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+	);
+
+	CD3DX12_HEAP_PROPERTIES defaultHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ThrowIfFailed(m_device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,     
+        &bufferDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&m_computeTestBuffer)));
+
+	// test: readback the stuff written by the compute shader
+	auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+	CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
+	ThrowIfFailed(m_device->CreateCommittedResource(
+		&readbackHeap,
+		D3D12_HEAP_FLAG_NONE,
+		&readbackDesc,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(&m_computeReadbackBuffer)
+	));
+
+	// ---- compute command list ----
+    ThrowIfFailed(m_device->CreateCommandAllocator(
+        D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&m_computeAllocator)));
+    ThrowIfFailed(m_device->CreateCommandList(0,
+        D3D12_COMMAND_LIST_TYPE_COMPUTE,
+        m_computeAllocator.Get(),
+        m_computeTestPipeline.Get(),
+        IID_PPV_ARGS(&m_computeCommandList)));
+		
+    ThrowIfFailed(m_computeCommandList->Close());
+}
+
+void D3D12Renderer::DispatchCompute()
+{
+	// reset
+    ThrowIfFailed(m_computeAllocator->Reset());
+    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_computeTestPipeline.Get()));
+
+	// set states
+    m_computeCommandList->SetComputeRootSignature(m_computeTestRootSignature.Get());
+    m_computeCommandList->SetPipelineState(m_computeTestPipeline.Get());
+    m_computeCommandList->SetComputeRootUnorderedAccessView(0, m_computeTestBuffer->GetGPUVirtualAddress());
+
+    // dispatch
+    m_computeCommandList->Dispatch((m_particleSystem.NUM_PARTICLES + 63) / 64, 1, 1);
+
+	ThrowIfFailed(m_computeCommandList->Close()); // <-- missing!
+
+	 // execute compute on the compute command queue
+    ID3D12CommandList* computeLists[] = { m_computeCommandList.Get() };
+    m_computeCommandQueue->ExecuteCommandLists(1, computeLists);
+
+    // waitforgpu but with the compute pipeline
+    m_computeFenceValue++;
+    ThrowIfFailed(m_computeCommandQueue->Signal(m_computeFence.Get(), m_computeFenceValue));
+    ThrowIfFailed(m_computeFence->SetEventOnCompletion(m_computeFenceValue, m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
 }
 
 void D3D12Renderer::PopulateCommandList()
@@ -475,4 +602,56 @@ void D3D12Renderer::WaitForGPU()
 
     // Increment the fence value for the current frame.
     m_fenceValues[m_frameIndex]++;
+}
+
+void D3D12Renderer::ReadbackCompute()
+{
+    // need a fresh command list to record the copy
+    ThrowIfFailed(m_computeAllocator->Reset());
+    ThrowIfFailed(m_computeCommandList->Reset(m_computeAllocator.Get(), m_computeTestPipeline.Get()));
+
+    // transition compute buffer from UAV -> copy source
+    CD3DX12_RESOURCE_BARRIER toCopySrc = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_computeTestBuffer.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COPY_SOURCE
+    );
+    m_computeCommandList->ResourceBarrier(1, &toCopySrc);
+
+    m_computeCommandList->CopyResource(m_computeReadbackBuffer.Get(), m_computeTestBuffer.Get());
+
+    // transition back so next frame's dispatch can write to it again
+    CD3DX12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_computeTestBuffer.Get(),
+        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+    );
+    m_computeCommandList->ResourceBarrier(1, &toUAV);
+
+    ThrowIfFailed(m_computeCommandList->Close());
+
+    ID3D12CommandList* lists[] = { m_computeCommandList.Get() };
+    m_computeCommandQueue->ExecuteCommandLists(1, lists);
+
+    // wait for copy to finish
+    m_computeFenceValue++;
+    ThrowIfFailed(m_computeCommandQueue->Signal(m_computeFence.Get(), m_computeFenceValue));
+    ThrowIfFailed(m_computeFence->SetEventOnCompletion(m_computeFenceValue, m_fenceEvent));
+    WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+    // map and print
+    UINT byteSize = m_particleSystem.NUM_PARTICLES * sizeof(XMFLOAT4);
+    XMFLOAT4* pData = nullptr;
+    CD3DX12_RANGE readRange(0, byteSize);
+    ThrowIfFailed(m_computeReadbackBuffer->Map(0, &readRange, reinterpret_cast<void**>(&pData)));
+
+    for (int i = 0; i < 8; i++)
+    {
+        char buf[64];
+        sprintf_s(buf, "particle[%d] = (%.1f, %.1f, %.1f, %.1f)\n",
+            i, pData[i].x, pData[i].y, pData[i].z, pData[i].w);
+        OutputDebugStringA(buf);
+    }
+
+    m_computeReadbackBuffer->Unmap(0, nullptr);
 }

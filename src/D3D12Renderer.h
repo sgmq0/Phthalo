@@ -88,6 +88,13 @@ private:
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
     void PopulateCommandList();     // records commands into the command list.
 
+    // helper functions for LoadAssets()
+    void CreateGraphicsPipeline();
+    void CreateBuffers();
+    void CreateComputePipeline();
+    
+    void DispatchCompute();
+
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
     void WaitForGPU();
@@ -108,4 +115,22 @@ private:
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
+
+    // ----- compute stuff -----
+    ComPtr<ID3D12Resource> m_computeTestBuffer; 
+    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
+    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
+	ComPtr<ID3DBlob> m_computeTestShaderBlob;
+
+    // testing
+    ComPtr<ID3D12Resource> m_computeReadbackBuffer;
+    void ReadbackCompute();
+
+    // separate compute command allocator/list
+    ComPtr<ID3D12CommandAllocator> m_computeAllocator;
+    ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
+    ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
+
+    ComPtr<ID3D12Fence> m_computeFence;
+    UINT64 m_computeFenceValue = 0;
 };
