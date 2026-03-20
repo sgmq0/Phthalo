@@ -35,6 +35,69 @@ void ParticleSystem::LoadParticles()
     m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
+void ParticleSystem::CreateComputePipeline(
+    ID3D12Device* device,
+    std::wstring shaderPath,
+    ComPtr<ID3D12CommandAllocator>& commandAllocator,
+    ComPtr<ID3D12GraphicsCommandList>& commandList)
+{
+    // 1. root signature
+    CD3DX12_ROOT_PARAMETER params[1];
+    params[0].InitAsUnorderedAccessView(0);
+    CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
+    rootDesc.NumParameters = 1;
+    rootDesc.pParameters = params;
+    rootDesc.NumStaticSamplers = 0;
+    rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+    ComPtr<ID3DBlob> sig, err;
+    ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+    ThrowIfFailed(device->CreateRootSignature(0, sig->GetBufferPointer(),
+        sig->GetBufferSize(), IID_PPV_ARGS(&m_computeTestRootSignature)));
+
+    // 2. compile shader
+    ComPtr<ID3DBlob> computeShader, computeError;
+    HRESULT hr = D3DCompileFromFile(shaderPath.c_str(), nullptr, nullptr,
+        "CSGridCount", "cs_5_0", 0, 0, &computeShader, &computeError);
+    if (computeError)
+        OutputDebugStringA((char*)computeError->GetBufferPointer());
+    ThrowIfFailed(hr);
+
+    // 3. pipeline state
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = m_computeTestRootSignature.Get();
+    psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+    ThrowIfFailed(device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_computeTestPipeline)));
+
+    // 4. compute buffer
+    UINT byteSize = NUM_PARTICLES * sizeof(XMFLOAT4);
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+    ThrowIfFailed(device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+        &bufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_computeTestBuffer)));
+
+    auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
+    CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
+    ThrowIfFailed(device->CreateCommittedResource(
+        &readbackHeap,
+        D3D12_HEAP_FLAG_NONE,
+        &readbackDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        nullptr,
+    IID_PPV_ARGS(&m_computeReadbackBuffer)));
+
+    // 5. command allocator + list
+    ThrowIfFailed(device->CreateCommandAllocator(
+        D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&commandAllocator)));
+    ThrowIfFailed(device->CreateCommandList(0,
+        D3D12_COMMAND_LIST_TYPE_COMPUTE,
+        commandAllocator.Get(),
+        m_computeTestPipeline.Get(),
+        IID_PPV_ARGS(&commandList)));
+    ThrowIfFailed(commandList->Close());
+}
+
+// --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
+
 XMFLOAT3 SubtractFloat3(XMFLOAT3 v1, XMFLOAT3 v2) {
     return XMFLOAT3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
 }

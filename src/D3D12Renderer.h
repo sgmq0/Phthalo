@@ -116,20 +116,12 @@ private:
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
 
-    // ----- compute stuff -----
-    ComPtr<ID3D12Resource> m_computeTestBuffer; 
-    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
-    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
-	ComPtr<ID3DBlob> m_computeTestShaderBlob;
-
-    // testing
-    ComPtr<ID3D12Resource> m_computeReadbackBuffer;
-    void ReadbackCompute();
-
     // separate compute command allocator/list
     ComPtr<ID3D12CommandAllocator> m_computeAllocator;
     ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
     ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
+
+    void ReadbackCompute();
 
     ComPtr<ID3D12Fence> m_computeFence;
     UINT64 m_computeFenceValue = 0;

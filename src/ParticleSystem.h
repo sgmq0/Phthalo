@@ -2,6 +2,7 @@
 #include "stdafx.h"
 
 #include "Instancer.h"
+#include "DXApplication.h"
 
 using namespace DirectX;
 
@@ -29,6 +30,20 @@ public:
     ComPtr<ID3D12Resource> m_simConstantBuffer; // buffer for all the constants
 
     Instancer m_instancer;
+
+    void ParticleSystem::CreateComputePipeline(
+        ID3D12Device* device,
+        std::wstring shaderPath,
+        ComPtr<ID3D12CommandAllocator>& commandAllocator,
+        ComPtr<ID3D12GraphicsCommandList>& commandList);
+    
+    ComPtr<ID3D12Resource> m_computeTestBuffer; 
+    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
+    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
+	ComPtr<ID3DBlob> m_computeTestShaderBlob;
+
+    // testing
+    ComPtr<ID3D12Resource> m_computeReadbackBuffer;
 
 private:
     
