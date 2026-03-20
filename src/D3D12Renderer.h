@@ -69,23 +69,6 @@ private:
     ComPtr<ID3D12Resource> m_depthBuffer;
     ComPtr<ID3D12DescriptorHeap> m_dsvHeap;
 
-    // ----- Compute pipeline stuff -----
-    ComPtr<ID3D12RootSignature>  m_computeRootSignature;
-    ComPtr<ID3D12PipelineState>  m_computePipelineState;
-
-    // GPU particle buffer (SRV, read-only in shader)
-    ComPtr<ID3D12Resource> m_particleBuffer;
-    ComPtr<ID3D12Resource> m_particleUploadBuffer;  // CPU -> GPU
-
-    // descriptor heap
-    ComPtr<ID3D12DescriptorHeap> m_computeHeap;
-    UINT m_computeDescriptorSize;
-
-    // constant struct
-    struct ComputeConstants {
-        UINT numParticles;
-    };
-
     // ----- Synchronization objects. -----
     UINT m_frameIndex;              // tracks the currently used frame buffer (0 or 1)
                                     // and uses it to index into m_renderTargets.
@@ -103,7 +86,6 @@ private:
 
     void LoadPipeline();            // loads and initializes the core pipeline objects. 
     void LoadAssets();              // loads shaders and creates the pipeline state as well as vertex data.
-    void LoadCompute();             // loads and initializes all the compute stuff
     void PopulateCommandList();     // records commands into the command list.
 
     // stuff to replace WaitForPreviousFrame()

@@ -2,11 +2,13 @@
 #include "ParticleSystem.h"
 
 ParticleSystem::ParticleSystem() :
+    m_numParticles(100),
     m_instancer(Instancer())
 {
 }
 
 ParticleSystem::ParticleSystem(UINT numParticles) :
+    m_numParticles(numParticles),
     m_instancer(Instancer())
 {  
 }

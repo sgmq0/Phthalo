@@ -28,21 +28,10 @@ struct InstanceData {
 };
 
 struct Particle {
-    XMFLOAT3 position; 
+    XMFLOAT3 position;
     XMFLOAT3 predictedPosition;
     XMFLOAT3 velocity;
     float density;
     float lambda;
     std::vector<int> neighbors;
-};
-
-struct GPUParticle {
-    XMFLOAT3 position;
-    float _pad0;
-    XMFLOAT3 predictedPosition;
-    float _pad1;
-    XMFLOAT3 velocity;
-    float density;
-    float lambda;
-    float _pad2[3];
 };
