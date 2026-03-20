@@ -280,20 +280,4 @@ void ParticleSystem::Update(float dt) {
 		m_particles[i].position = pred;
 	}
 
-	UpdateInstances();
-}
-
-void ParticleSystem::UpdateInstances() {
-    // push to instances vector
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-        XMMATRIX mat = XMMatrixTranslation(
-            m_particles[i].position.x,
-            m_particles[i].position.y,
-            m_particles[i].position.z
-        );
-
-        XMStoreFloat4x4(&m_instancer.m_instances[i].worldMatrix, mat);
-    }
-
-    memcpy(m_instancer.m_pInstanceDataBegin, m_instancer.m_instances.data(), sizeof(InstanceData) * NUM_PARTICLES);
 }

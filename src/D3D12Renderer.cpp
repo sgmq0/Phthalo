@@ -47,6 +47,23 @@ void D3D12Renderer::OnUpdate()
 
 	m_particleSystem.Update(dt);
 
+    // reset command list 
+    ThrowIfFailed(m_commandAllocators[m_frameIndex]->Reset());
+    ThrowIfFailed(m_commandList->Reset(m_commandAllocators[m_frameIndex].Get(), nullptr));
+
+	// run the compute
+	m_particleSystem.m_instancer.ComputeInstances(
+		m_commandList.Get(),
+		m_commandQueue.Get(),
+		m_particleSystem.m_particles,
+		m_particleSystem.NUM_PARTICLES);
+
+	// execute and wait so compute is done before PopulateCommandList runs
+	// this feels kind of scuffed
+    ThrowIfFailed(m_commandList->Close());
+    ID3D12CommandList* lists[] = { m_commandList.Get() };
+    m_commandQueue->ExecuteCommandLists(1, lists);
+    WaitForGPU();
 }
 
 void D3D12Renderer::OnRender()
@@ -412,6 +429,7 @@ void D3D12Renderer::PopulateCommandList()
 	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
 	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	m_particleSystem.m_instancer.TransitionToVertexBuffer(m_commandList.Get()); // start working with the particles
 	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
 
 	// present back buffer
