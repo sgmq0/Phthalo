@@ -353,29 +353,8 @@ void D3D12Renderer::LoadAssets()
 	}
 
 	// ---------- create the instancing buffer ----------
-	{
-		const UINT instanceBufferSize = m_particleSystem.NUM_PARTICLES * sizeof(InstanceData);
-
-		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(instanceBufferSize);
-		ThrowIfFailed(m_device->CreateCommittedResource(
-			&heapProps,
-			D3D12_HEAP_FLAG_NONE,
-			&bufferDesc,
-			D3D12_RESOURCE_STATE_GENERIC_READ,
-			nullptr,
-			IID_PPV_ARGS(&m_particleSystem.m_instancer.m_instanceBuffer)));
-
-		// copy instance data to instance buffer
-		CD3DX12_RANGE readRange(0, 0);        // We do not intend to read from this resource on the CPU.
-		ThrowIfFailed(m_particleSystem.m_instancer.m_instanceBuffer->Map(0, &readRange, 
-			reinterpret_cast<void**>(&m_particleSystem.m_instancer.m_pInstanceDataBegin)));
-
-		// init instance buffer view
-		m_particleSystem.m_instancer.m_instanceBufferView.BufferLocation = m_particleSystem.m_instancer.m_instanceBuffer->GetGPUVirtualAddress();
-		m_particleSystem.m_instancer.m_instanceBufferView.StrideInBytes = sizeof(InstanceData);
-		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
-	}
+	// put this in instancer class
+	m_particleSystem.m_instancer.Init(m_device.Get(), m_particleSystem.NUM_PARTICLES);
 
 	// ---------- synchronization objects, fences and such ----------
 	// create fence and wait for the gpu.
