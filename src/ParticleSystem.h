@@ -31,6 +31,7 @@ public:
 
     Instancer m_instancer;
 
+    // compute pipeline things
     void ParticleSystem::CreateComputePipeline(
         ID3D12Device* device,
         std::wstring shaderPath,
@@ -44,6 +45,27 @@ public:
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
+
+    // compute for gpu grid search
+    static const int   GRID_DIM        = 7;     // ceil(boxSize*2 / cellSize) + 1
+    static const int   GRID_TOTAL_CELLS = GRID_DIM * GRID_DIM * GRID_DIM;  // 343
+    static const float GRID_CELL_SIZE;   // defined in .cpp, equals smoothing radius
+    static const float GRID_ORIGIN;      // defined in .cpp, e.g. -3.5f
+
+    struct GridEntry { UINT cellIndex; UINT particleIndex; };
+
+    // GPU resources
+    ComPtr<ID3D12Resource> m_positionBuffer;       // float4[NUM_PARTICLES] — input
+    ComPtr<ID3D12Resource> m_gridEntryBuffer;      // GridEntry[NUM_PARTICLES] — output
+
+    // pipeline objects  
+    ComPtr<ID3D12RootSignature> m_assignRootSignature;
+    ComPtr<ID3D12PipelineState> m_assignPipeline;
+    ComPtr<ID3D12Resource>      m_assignConstantBuffer;
+
+    void CreateAssignPipeline(ID3D12Device* device, std::wstring shaderPath);
+    void UploadPositions(ID3D12GraphicsCommandList* cmdList);
+    void DispatchAssign(ID3D12GraphicsCommandList* cmdList);
 
 private:
     
