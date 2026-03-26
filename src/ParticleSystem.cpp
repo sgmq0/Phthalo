@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ParticleSystem.h"
+#include <iostream>
 
 ParticleSystem::ParticleSystem() :
     m_numParticles(100),
@@ -35,55 +36,99 @@ void ParticleSystem::LoadParticles()
     m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
+ComPtr<ID3DBlob> CompileHelper(std::wstring shaderPath, const char* entry) {
+    ComPtr<ID3DBlob> computeShader, computeError;
+    HRESULT hr = D3DCompileFromFile(shaderPath.c_str(),
+        nullptr, nullptr, entry, "cs_5_0", 0, 0, &computeShader, &computeError);
+    if (computeError) OutputDebugStringA((char*)computeError->GetBufferPointer());
+    ThrowIfFailed(hr);
+    return computeShader;
+};
+
+ComPtr<ID3D12PipelineState> MakePSOHelper(ComPtr<ID3DBlob> computeShader, ComPtr<ID3D12RootSignature> rootSignature, ID3D12Device* device) {
+    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
+    psoDesc.pRootSignature = rootSignature.Get();
+    psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
+
+    ComPtr<ID3D12PipelineState> pso;
+    ThrowIfFailed(device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&pso)));
+    return pso;
+};
+
+ComPtr<ID3D12Resource> MakeBufferHelper(UINT byteSize, ID3D12Device* device) {
+    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+
+    ComPtr<ID3D12Resource> buffer;
+    ThrowIfFailed(device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
+        &bufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&buffer)));
+    return buffer;
+}
+
 void ParticleSystem::CreateComputePipeline(
-    ID3D12Device* device,
+    ID3D12Device *device,
     std::wstring shaderPath,
-    ComPtr<ID3D12CommandAllocator>& commandAllocator,
-    ComPtr<ID3D12GraphicsCommandList>& commandList)
+    ComPtr<ID3D12CommandAllocator> &commandAllocator,
+    ComPtr<ID3D12GraphicsCommandList> &commandList)
 {
     // 1. root signature
-    CD3DX12_ROOT_PARAMETER params[1];
-    params[0].InitAsUnorderedAccessView(0);
+    // CD3DX12_ROOT_PARAMETER params[1];
+    // params[0].InitAsUnorderedAccessView(0);
+
+    CD3DX12_ROOT_PARAMETER params[4];
+    params[0].InitAsConstantBufferView(0);  // b0: NSConstants
+    params[1].InitAsUnorderedAccessView(0); // u0: cellCount
+    params[2].InitAsUnorderedAccessView(1); // u1: intraOffset
+    params[3].InitAsShaderResourceView(0);  // t0: particlesIn
+
     CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
-    rootDesc.NumParameters = 1;
+    //rootDesc.NumParameters = 1;
+    rootDesc.NumParameters = 4;
     rootDesc.pParameters = params;
     rootDesc.NumStaticSamplers = 0;
     rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
     ComPtr<ID3DBlob> sig, err;
     ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
     ThrowIfFailed(device->CreateRootSignature(0, sig->GetBufferPointer(),
-        sig->GetBufferSize(), IID_PPV_ARGS(&m_computeTestRootSignature)));
+        sig->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)));
 
-    // 2. compile shader
-    ComPtr<ID3DBlob> computeShader, computeError;
-    HRESULT hr = D3DCompileFromFile(shaderPath.c_str(), nullptr, nullptr,
-        "CSGridCount", "cs_5_0", 0, 0, &computeShader, &computeError);
-    if (computeError)
-        OutputDebugStringA((char*)computeError->GetBufferPointer());
-    ThrowIfFailed(hr);
+    // 2. compile both CSClearCells and CSCounting
+    ComPtr<ID3DBlob> clearCells = CompileHelper(shaderPath, "CSClearCells");
+    ComPtr<ID3DBlob> count = CompileHelper(shaderPath, "CSCounting");
 
-    // 3. pipeline state
-    D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-    psoDesc.pRootSignature = m_computeTestRootSignature.Get();
-    psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
-    ThrowIfFailed(device->CreateComputePipelineState(&psoDesc, IID_PPV_ARGS(&m_computeTestPipeline)));
+    // 3. set pipeline states
+    m_psoClear = MakePSOHelper(clearCells.Get(), m_computeRootSignature.Get(), device);
+    m_psoCount = MakePSOHelper(count.Get(), m_computeRootSignature.Get(), device);
 
-    // 4. compute buffer
-    UINT byteSize = NUM_PARTICLES * sizeof(XMFLOAT4);
-    auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(device->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
-        &bufferDesc, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr, IID_PPV_ARGS(&m_computeTestBuffer)));
+    // 4. all of the buffers
+    //UINT byteSize = NUM_PARTICLES * sizeof(XMFLOAT4);
+    //m_computeTestBuffer = MakeBufferHelper(NUM_PARTICLES * sizeof(XMFLOAT4), device);
+    m_nsCellCount = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
+    m_nsIntraOffset = MakeBufferHelper(NUM_PARTICLES * sizeof(int), device);
+    m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
 
-    auto readbackDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize);
-    CD3DX12_HEAP_PROPERTIES readbackHeap(D3D12_HEAP_TYPE_READBACK);
-    ThrowIfFailed(device->CreateCommittedResource(
-        &readbackHeap,
-        D3D12_HEAP_FLAG_NONE,
-        &readbackDesc,
-        D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr,
-    IID_PPV_ARGS(&m_computeReadbackBuffer)));
+    // upload buffer, which CPU writes to, then CopyResource to m_nsParticlesIn
+    {
+        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_UPLOAD);
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(
+            NUM_PARTICLES * sizeof(GPUParticle));
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&m_nsUploadBuffer)));
+    }
+
+    // const buffer (256-byte aligned)
+    {
+        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_UPLOAD);
+        UINT sz = (sizeof(NSConstants) + 255) & ~255;
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(sz);
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            IID_PPV_ARGS(&m_nsConstantBuffer)));
+    }
 
     // 5. command allocator + list
     ThrowIfFailed(device->CreateCommandAllocator(
@@ -91,9 +136,98 @@ void ParticleSystem::CreateComputePipeline(
     ThrowIfFailed(device->CreateCommandList(0,
         D3D12_COMMAND_LIST_TYPE_COMPUTE,
         commandAllocator.Get(),
-        m_computeTestPipeline.Get(),
+        m_psoClear.Get(),
         IID_PPV_ARGS(&commandList)));
     ThrowIfFailed(commandList->Close());
+
+    std::cout << "compute pipeline created" << std::endl;
+}
+
+void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
+{
+    if (m_nsFirstFrame) {
+        auto toSRV = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        cmdList->ResourceBarrier(1, &toSRV);
+        m_nsFirstFrame = false;
+    }
+
+    // upload particle positions to the gpu
+    {
+        std::vector<GPUParticle> gpu(NUM_PARTICLES);
+        for (int i = 0; i < NUM_PARTICLES; i++) {
+            gpu[i].position          = m_particles[i].position;
+            gpu[i].predictedPosition = m_particles[i].predictedPosition;
+            gpu[i].velocity          = m_particles[i].velocity;
+            gpu[i].density           = m_particles[i].density;
+            gpu[i].lambda            = m_particles[i].lambda;
+        }
+        void* mapped = nullptr;
+        m_nsUploadBuffer->Map(0, nullptr, &mapped);
+        memcpy(mapped, gpu.data(), NUM_PARTICLES * sizeof(GPUParticle));
+        m_nsUploadBuffer->Unmap(0, nullptr);
+
+        auto toDst = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            D3D12_RESOURCE_STATE_COPY_DEST);
+        cmdList->ResourceBarrier(1, &toDst);
+        cmdList->CopyResource(m_nsParticlesIn.Get(), m_nsUploadBuffer.Get());
+        auto toSRV = CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        cmdList->ResourceBarrier(1, &toSRV);
+    }
+
+    // upload constants
+    {
+        struct NSConstants {
+            XMFLOAT3 gridOrigin; float cellSize;
+            int gridDimX, gridDimY, gridDimZ;
+            int numParticles, numCells;
+            int _pad[3];
+        };
+        NSConstants cb;
+        cb.gridOrigin = XMFLOAT3(-3.5f, 0.0f, -3.5f);
+        cb.cellSize = 1.0f;  // smoothing radius
+        cb.gridDimX = NS_GRID_DIM_X;
+        cb.gridDimY = NS_GRID_DIM_Y;
+        cb.gridDimZ = NS_GRID_DIM_Z;
+        cb.numParticles = (int)NUM_PARTICLES;
+        cb.numCells = NS_NUM_CELLS;
+        void* mapped = nullptr;
+        m_nsConstantBuffer->Map(0, nullptr, &mapped);
+        memcpy(mapped, &cb, sizeof(cb));
+        m_nsConstantBuffer->Unmap(0, nullptr);
+    }
+
+    // set root signature
+    cmdList->SetComputeRootSignature(m_computeRootSignature.Get());
+    cmdList->SetComputeRootConstantBufferView(0, m_nsConstantBuffer->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(1, m_nsCellCount->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(2, m_nsIntraOffset->GetGPUVirtualAddress());
+    cmdList->SetComputeRootShaderResourceView(3, m_nsParticlesIn->GetGPUVirtualAddress());
+
+    // clear pass 
+    cmdList->SetPipelineState(m_psoClear.Get());
+    cmdList->Dispatch((NS_NUM_CELLS + 63) / 64, 1, 1);
+
+    D3D12_RESOURCE_BARRIER clearBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsCellCount.Get());
+    cmdList->ResourceBarrier(1, &clearBarrier);
+
+    // count pass
+    cmdList->SetPipelineState(m_psoCount.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+
+    D3D12_RESOURCE_BARRIER countBarriers[2] = {
+        CD3DX12_RESOURCE_BARRIER::UAV(m_nsCellCount.Get()),
+        CD3DX12_RESOURCE_BARRIER::UAV(m_nsIntraOffset.Get()),
+    };
+    cmdList->ResourceBarrier(2, countBarriers);
+
 }
 
 // --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
@@ -184,7 +318,7 @@ XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, 
 }
 
 
-void ParticleSystem::Update(float dt) {
+void ParticleSystem::Update(float dt, ID3D12GraphicsCommandList* cmdList) {
     if (dt <= 0.0f || dt > 0.1f) return;
 
 	const float radius      = 1.0f;
@@ -210,23 +344,7 @@ void ParticleSystem::Update(float dt) {
     }
 
 	// ------------ STEP 2: FIND NEIGHBORS --------------
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-		m_particles[i].neighbors.clear();
-	}
-    
-	for (int i = 0; i < NUM_PARTICLES; i++) {
-		for (int j = i + 1; j < NUM_PARTICLES; j++) {
-			float dx = m_particles[i].predictedPosition.x - m_particles[j].predictedPosition.x;
-			float dy = m_particles[i].predictedPosition.y - m_particles[j].predictedPosition.y;
-			float dz = m_particles[i].predictedPosition.z - m_particles[j].predictedPosition.z;
-			float dist2 = dx*dx + dy*dy + dz*dz;
-
-			if (dist2 < radius2) {
-				m_particles[i].neighbors.push_back(j);
-				m_particles[j].neighbors.push_back(i);
-			}
-		}
-	}
+	DispatchNeighborSearch(cmdList);
 
 	// calculations for all particles
     std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});

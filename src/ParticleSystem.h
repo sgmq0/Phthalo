@@ -12,7 +12,7 @@ public:
     ParticleSystem(UINT numParticles);
 
     void LoadParticles();
-    void Update(float dt);
+    void Update(float dt, ID3D12GraphicsCommandList* cmdList);
     void UpdateInstances();
 
     float ComputeDensityConstraint(int i, float radius);
@@ -22,50 +22,36 @@ public:
     static const UINT NUM_PARTICLES = 1000;
     Particle m_particles[NUM_PARTICLES];
 
-    ComPtr<ID3D12Resource> m_particleBuffer;    // STEP 1
-    ComPtr<ID3D12Resource> m_lambdaBuffer;      // STEP 3-4
-    ComPtr<ID3D12Resource> m_deltaBuffer;       // STEP 5
-    ComPtr<ID3D12Resource> m_densityBuffer;  
-    ComPtr<ID3D12Resource> m_xsphBuffer; 
-    ComPtr<ID3D12Resource> m_simConstantBuffer; // buffer for all the constants
-
     Instancer m_instancer;
 
-    // compute pipeline things
-    void ParticleSystem::CreateComputePipeline(
+    // ----- the actual compute pipeline -----
+    void CreateComputePipeline(
         ID3D12Device* device,
         std::wstring shaderPath,
         ComPtr<ID3D12CommandAllocator>& commandAllocator,
-        ComPtr<ID3D12GraphicsCommandList>& commandList);
+        ComPtr<ID3D12GraphicsCommandList>& commandList
+    );
+    void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
+
+    static constexpr int NS_GRID_DIM_X = 20;  // (-3 to +3) / cellSize = 0.35 -> 18, round up
+    static constexpr int NS_GRID_DIM_Y = 26;  // 0 to 9 / 0.35 -> 26
+    static constexpr int NS_GRID_DIM_Z = 20;
+    static constexpr int NS_NUM_CELLS  = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
     
-    ComPtr<ID3D12Resource> m_computeTestBuffer; 
-    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
-    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
-	ComPtr<ID3DBlob> m_computeTestShaderBlob;
+    bool m_nsFirstFrame = true;
+
+    ComPtr<ID3D12RootSignature> m_computeRootSignature;
+    ComPtr<ID3D12PipelineState> m_psoClear;
+    ComPtr<ID3D12PipelineState> m_psoCount;
+
+    ComPtr<ID3D12Resource> m_nsCellCount;       // u0: int per cell, zeroed each frame
+    ComPtr<ID3D12Resource> m_nsIntraOffset;     // u1: int per particle, slot within cell
+    ComPtr<ID3D12Resource> m_nsParticlesIn;     // u2: GPUParticle upload target
+    ComPtr<ID3D12Resource> m_nsUploadBuffer;    // CPU -> GPU staging
+    ComPtr<ID3D12Resource> m_nsConstantBuffer;  // b0: constant buffer
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
-
-    // compute for gpu grid search
-    static const int   GRID_DIM        = 7;     // ceil(boxSize*2 / cellSize) + 1
-    static const int   GRID_TOTAL_CELLS = GRID_DIM * GRID_DIM * GRID_DIM;  // 343
-    static const float GRID_CELL_SIZE;   // defined in .cpp, equals smoothing radius
-    static const float GRID_ORIGIN;      // defined in .cpp, e.g. -3.5f
-
-    struct GridEntry { UINT cellIndex; UINT particleIndex; };
-
-    // GPU resources
-    ComPtr<ID3D12Resource> m_positionBuffer;       // float4[NUM_PARTICLES] — input
-    ComPtr<ID3D12Resource> m_gridEntryBuffer;      // GridEntry[NUM_PARTICLES] — output
-
-    // pipeline objects  
-    ComPtr<ID3D12RootSignature> m_assignRootSignature;
-    ComPtr<ID3D12PipelineState> m_assignPipeline;
-    ComPtr<ID3D12Resource>      m_assignConstantBuffer;
-
-    void CreateAssignPipeline(ID3D12Device* device, std::wstring shaderPath);
-    void UploadPositions(ID3D12GraphicsCommandList* cmdList);
-    void DispatchAssign(ID3D12GraphicsCommandList* cmdList);
 
 private:
     

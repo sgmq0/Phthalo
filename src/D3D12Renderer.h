@@ -91,13 +91,22 @@ private:
     // helper functions for LoadAssets()
     void CreateGraphicsPipeline();
     void CreateBuffers();
-    void CreateComputePipeline();
-    
-    void DispatchCompute();
 
     // stuff to replace WaitForPreviousFrame()
     void MoveToNextFrame();
     void WaitForGPU();
+
+    // ----- Compute stuff -----
+    // move all this to a different compute class later
+    ComPtr<ID3D12CommandAllocator> m_computeAllocator;
+    ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
+    ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
+
+    //void ReadbackCompute();
+    //void DispatchCompute();
+
+    ComPtr<ID3D12Fence> m_computeFence;
+    UINT64 m_computeFenceValue = 0;
 
     // ----- Camera stuff -----
     ComPtr<ID3D12Resource> m_constantBuffer;
@@ -115,14 +124,4 @@ private:
     void D3D12Renderer::OnKeyDown(UINT8 key) { m_camera.OnKeyDown(key); }
     void D3D12Renderer::OnKeyUp  (UINT8 key) { m_camera.OnKeyUp(key);   }
     void D3D12Renderer::OnMouseMove(int dx, int dy) { m_camera.OnMouseMove(dx, dy); }
-
-    // separate compute command allocator/list
-    ComPtr<ID3D12CommandAllocator> m_computeAllocator;
-    ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
-    ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
-
-    void ReadbackCompute();
-
-    ComPtr<ID3D12Fence> m_computeFence;
-    UINT64 m_computeFenceValue = 0;
 };
