@@ -12,28 +12,46 @@ public:
     ParticleSystem(UINT numParticles);
 
     void LoadParticles();
-    void Update(float dt);
+    void Update(float dt, ID3D12GraphicsCommandList* cmdList);
     void UpdateInstances();
 
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
+    UINT m_numParticles = 100;
     static const UINT NUM_PARTICLES = 1000;
     Particle m_particles[NUM_PARTICLES];
 
     Instancer m_instancer;
 
-    // test pipeline stuff
-    void ParticleSystem::CreateComputePipeline(
+    // ----- the actual compute pipeline -----
+    void CreateComputePipeline(
         ID3D12Device* device,
         std::wstring shaderPath,
         ComPtr<ID3D12CommandAllocator>& commandAllocator,
-        ComPtr<ID3D12GraphicsCommandList>& commandList);
+        ComPtr<ID3D12GraphicsCommandList>& commandList
+    );
+    void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
+
+    static constexpr int NS_GRID_DIM_X = 20;  // (-3 to +3) / cellSize = 0.35 -> 18, round up
+    static constexpr int NS_GRID_DIM_Y = 26;  // 0 to 9 / 0.35 -> 26
+    static constexpr int NS_GRID_DIM_Z = 20;
+    static constexpr int NS_NUM_CELLS  = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
     
-    ComPtr<ID3D12Resource> m_computeTestBuffer; 
-    ComPtr<ID3D12RootSignature> m_computeTestRootSignature;
-    ComPtr<ID3D12PipelineState> m_computeTestPipeline;
-	ComPtr<ID3DBlob> m_computeTestShaderBlob;
+    bool m_nsFirstFrame = true;
+
+    ComPtr<ID3D12RootSignature> m_computeRootSignature;
+    ComPtr<ID3D12PipelineState> m_psoClear;
+    ComPtr<ID3D12PipelineState> m_psoCount;
+
+    ComPtr<ID3D12Resource> m_nsCellCount;       // u0: int per cell, zeroed each frame
+    ComPtr<ID3D12Resource> m_nsIntraOffset;     // u1: int per particle, slot within cell
+    ComPtr<ID3D12Resource> m_nsParticlesIn;     // u2: GPUParticle upload target
+    ComPtr<ID3D12Resource> m_nsUploadBuffer;    // CPU -> GPU staging
+    ComPtr<ID3D12Resource> m_nsConstantBuffer;  // b0: constant buffer
+
+    // testing
+    ComPtr<ID3D12Resource> m_computeReadbackBuffer;
 
 private:
     
