@@ -502,15 +502,15 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
     if (dt <= 0.0f) return;  // skip PBD on frame 1
 
     // put this into the constant buffer later....
-	const float radius      = 1.0f;
-    const float radius2     = radius * radius;
-    const float rho_0       = 10.0f;       // rest density
-    const float epsilon     = 100.0f;
-    const float damping     = 0.999f;
-    const float boxSize     = 10.0f;
+	const float radius = 1.0f;
+    const float radius2 = radius * radius;
+    const float rho_0 = 10.0f;       // rest density
+    const float epsilon = 100.0f;
+    const float damping = 0.999f;
+    const float boxSize = 10.0f;
     const float restitution = 0.3f;
-    const float viscosity   = 0.05f;
-    const int iterations    = 3;
+    const float viscosity = 0.05f;
+    const int iterations = 3;
 
 	// update positions and velocity
 	for (int i = 0; i < NUM_PARTICLES; i++) {
@@ -533,6 +533,8 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
         if (pred.y <=    0.0f  && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
         if (pred.z <= -boxSize && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
         if (pred.z >=  boxSize && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
+
+        // todo: vorticity
 
         // apply XSPH (fix: use per-axis components)
         m_particles[i].velocity.x += m_particles[i].xsph.x * viscosity;

@@ -12,7 +12,7 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_scissorRect(0, 0, static_cast<LONG>(width), static_cast<LONG>(height)),
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
-	m_camera(XMFLOAT3(-10.0f, 2.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
+	m_camera(XMFLOAT3(-30.0f, 10.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
 	m_particleSystem(ParticleSystem(500))
 {
 }
@@ -64,21 +64,6 @@ void D3D12Renderer::OnUpdate()
 	ThrowIfFailed(m_computeFence->SetEventOnCompletion(
 		m_computeFenceValue, m_fenceEvent));
 	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
-
-	// static bool validated = false;
-	// if (!validated) {
-	// 	ThrowIfFailed(m_computeAllocator->Reset());
-	// 	ThrowIfFailed(m_computeCommandList->Reset(
-	// 		m_computeAllocator.Get(), m_particleSystem.m_psoClear.Get()));
-
-	// 	m_particleSystem.ValidatePrefixSum(
-	// 		m_computeCommandList.Get(),
-	// 		m_computeCommandQueue.Get(),
-	// 		m_computeFence.Get(),
-	// 		m_computeFenceValue,
-	// 		m_fenceEvent);
-	// 	validated = true;
-	// }
 
 	m_particleSystem.ReadbackParticleData(m_computeCommandList.Get());
 	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
