@@ -29,7 +29,18 @@ cbuffer NSConstants : register(b0) {
 
 RWStructuredBuffer<int>        cellCount   : register(u0);
 RWStructuredBuffer<int>        intraOffset : register(u1);
-StructuredBuffer<GPUParticle>  particlesIn : register(t0);
+RWStructuredBuffer<GPUParticle> particlesIn : register(u2);
+
+RWStructuredBuffer<int> cellStart : register(u3);
+RWStructuredBuffer<int> statusBuf : register(u4);
+
+#define STATUS_SHIFT 30
+#define VALUE_MASK   0x3FFFFFFF
+#define TILE 256
+groupshared int gs[TILE];
+groupshared int gs_exclusivePrefix;
+
+// step 1 - counting kernel
 
 int CellIndex(float3 pos) {
     int3 cell = (int3)floor((pos - gridOrigin) / cellSize);
@@ -52,4 +63,109 @@ void CSCounting(uint3 tid : SV_DispatchThreadID) {
     int slot;
     InterlockedAdd(cellCount[cell], 1, slot);
     intraOffset[tid.x] = slot;
+}
+
+[numthreads(1, 1, 1)]
+void CSBindingTest(uint3 tid : SV_DispatchThreadID) {
+    cellCount[0] = 42;
+}
+
+[numthreads(64, 1, 1)]
+void CSClearStatus(uint3 tid : SV_DispatchThreadID) {
+    uint numGroups = ((uint)numCells + 255) / 256;
+    if ((int)tid.x < numGroups)
+        statusBuf[tid.x] = 0;
+}
+
+[numthreads(TILE, 1, 1)]
+void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    /*
+    idea: each thread posts its result to a shared array (u4, statusBuf), as soon as it's ready
+    0: not started yet
+    1: local aggregate ready (partial)
+    2: inclusive prefix ready (final)
+    [MG16] - 2016 paper by Merrill and Garland
+    */
+
+    uint global = gid.x * TILE + tid.x;
+    int prev;
+
+    // 1. load tile from cellCount into shared memory
+    if (tid.x == 0)
+        gs_exclusivePrefix = 0;
+    GroupMemoryBarrierWithGroupSync();
+    
+    gs[tid.x] = (global < (uint)numCells) ? cellCount[global] : 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    // 2. local inclusive scan (Hillis-Steele)
+    for (uint stride = 1; stride < TILE; stride <<= 1)
+    {
+        int val = (tid.x >= stride) ? gs[tid.x - stride] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        gs[tid.x] += val;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    // 3. write local aggregate with status = 1 (partial)
+    if (tid.x == 0)
+    {
+        int localSum = gs[TILE - 1];
+        // group 0 already knows its inclusive prefix (no look-back needed)
+        if (gid.x == 0)
+        {
+            InterlockedExchange(statusBuf[0], (2 << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
+        }
+        else
+        {
+            InterlockedExchange(statusBuf[gid.x], (1 << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
+        }
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // 4. look-back: thread 0 walks left accumulating the exclusive prefix
+    if (tid.x == 0 && gid.x > 0)
+    {
+        int exclusivePrefix = 0;
+        int lookIdx = (int)gid.x - 1;
+
+        while (lookIdx >= 0)
+        {
+            int packed;
+            do {
+                InterlockedAdd(statusBuf[lookIdx], 0, packed);
+            } while ((packed >> STATUS_SHIFT) == 0);
+
+            int status = packed >> STATUS_SHIFT;
+            int value  = packed & VALUE_MASK;
+
+            if (status == 2)
+            {
+                exclusivePrefix += value;
+                break;
+            }
+            else
+            {
+                exclusivePrefix += value;
+                lookIdx--;
+            }
+        }
+
+        // write into the groupshared variable so all threads can read it
+        gs_exclusivePrefix = exclusivePrefix;
+
+        int myInclusive = exclusivePrefix + gs[TILE - 1];
+        int prev;
+        InterlockedExchange(statusBuf[gid.x],
+            (2 << STATUS_SHIFT) | (myInclusive & VALUE_MASK), prev);
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // 5. all threads write their exclusive result to cellStart
+    if (global < (uint)numCells)
+    {
+        int localExclusive = gs[tid.x] - cellCount[global];
+        cellStart[global] = (gid.x == 0 ? 0 : gs_exclusivePrefix) + localExclusive;
+    }
 }

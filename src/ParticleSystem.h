@@ -18,7 +18,6 @@ public:
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
-    UINT m_numParticles = 100;
     static const UINT NUM_PARTICLES = 1000;
     Particle m_particles[NUM_PARTICLES];
 
@@ -41,14 +40,40 @@ public:
     bool m_nsFirstFrame = true;
 
     ComPtr<ID3D12RootSignature> m_computeRootSignature;
+    ComPtr<ID3D12Resource> m_nsUploadBuffer;    // CPU -> GPU staging
+    ComPtr<ID3D12Resource> m_nsConstantBuffer;  // b0: constant buffer
+
+    // first pass: counting kernel
     ComPtr<ID3D12PipelineState> m_psoClear;
     ComPtr<ID3D12PipelineState> m_psoCount;
 
     ComPtr<ID3D12Resource> m_nsCellCount;       // u0: int per cell, zeroed each frame
     ComPtr<ID3D12Resource> m_nsIntraOffset;     // u1: int per particle, slot within cell
     ComPtr<ID3D12Resource> m_nsParticlesIn;     // u2: GPUParticle upload target
-    ComPtr<ID3D12Resource> m_nsUploadBuffer;    // CPU -> GPU staging
-    ComPtr<ID3D12Resource> m_nsConstantBuffer;  // b0: constant buffer
+
+    // second pass: global prefix sum
+    ComPtr<ID3D12PipelineState> m_psoClearStatus;
+    ComPtr<ID3D12PipelineState> m_psoPrefixScanPass;
+
+    ComPtr<ID3D12Resource> m_nsCellStart;       // u3: prefix sum output
+    ComPtr<ID3D12Resource> m_nsStatusBuf;       // u4: scratch inter-group aggregates
+
+    // readback
+    ComPtr<ID3D12Resource> m_nsReadbackCellCount;
+    ComPtr<ID3D12Resource> m_nsReadbackCellStart;
+
+    void ValidateCounting(
+        ID3D12GraphicsCommandList* cmdList,
+        ID3D12CommandQueue* cmdQueue,
+        ID3D12Fence* fence,
+        UINT64& fenceValue,
+        HANDLE fenceEvent);
+    void ParticleSystem::ValidatePrefixSum(
+        ID3D12GraphicsCommandList* cmdList,
+        ID3D12CommandQueue* cmdQueue,
+        ID3D12Fence* fence,
+        UINT64& fenceValue,
+        HANDLE fenceEvent);
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
