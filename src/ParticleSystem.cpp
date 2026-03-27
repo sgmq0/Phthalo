@@ -111,6 +111,9 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3DBlob> computeLambda = CompileHelper(shaderPath, "CSComputeLambda");
     m_psoComputeLambda = MakePSOHelper(computeLambda.Get(), m_computeRootSignature.Get(), device);
 
+    ComPtr<ID3DBlob> computeDelta = CompileHelper(shaderPath, "CSComputeDelta");
+    m_psoComputeDelta = MakePSOHelper(computeDelta.Get(), m_computeRootSignature.Get(), device);
+
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
     m_nsCellCount = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
@@ -198,10 +201,18 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     DispatchPrediction(cmdList, dt);
     DispatchNeighborSearch(cmdList);
 
+    // compute lambda_i
     cmdList->SetPipelineState(m_psoComputeLambda.Get());
     cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
     auto lambdaBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
     cmdList->ResourceBarrier(1, &lambdaBarrier);
+
+    // compute delta rho
+    // step 5: compute and apply delta
+    cmdList->SetPipelineState(m_psoComputeDelta.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    cmdList->ResourceBarrier(1, &b2);
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)

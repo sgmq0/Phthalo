@@ -279,3 +279,63 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
     particlesIn[i].lambda = -constraint / denominator;
     //particlesIn[i].lambda = test;
 }
+
+[numthreads(64, 1, 1)]
+void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    GPUParticle pi = particlesOut[i];  // sorted slot i
+    float3 pos_i = pi.predictedPosition;
+    float lambda_i = particlesIn[pi.originalIndex].lambda;  // written by CSComputeLambda
+
+    int3 cell = clamp(
+        (int3)floor((pos_i - gridOrigin) / cellSize),
+        int3(0, 0, 0),
+        gridDim - int3(1, 1, 1)
+    );
+
+    // tensile correction constants — match your CPU values exactly
+    const float corr_n = 4.0f;
+    const float corr_h = 0.30f;
+    const float corr_k = 1e-04f;
+    // Poly6 of (corr_h * H, 0, 0)
+    float3 corrVec = float3(corr_h * H, 0.0f, 0.0f);
+    float corr_w = Poly6(corrVec, H);
+
+    float3 delta = float3(0, 0, 0);
+
+    for (int dx = -1; dx <= 1; dx++)
+    for (int dy = -1; dy <= 1; dy++)
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        int3 nc = cell + int3(dx, dy, dz);
+        if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
+
+        int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+        int start = cellStart[flat];
+        int cellN = cellCount[flat];
+
+        for (int k = 0; k < cellN; k++)
+        {
+            GPUParticle pj = particlesOut[start + k];
+            float lambda_j = particlesIn[pj.originalIndex].lambda;
+
+            float3 r = pos_i - pj.predictedPosition;
+
+            float poly = Poly6(r, H);
+            float ratio = (corr_w > 1e-12f) ? (poly / corr_w) : 0.0f;
+            float corr_coeff = -corr_k * pow(ratio, corr_n);
+            float coeff = lambda_i + lambda_j + corr_coeff;
+
+            float3 grad = SpikyGradient(r, H);
+            delta += coeff * grad;
+        }
+    }
+
+    delta /= RHO_0;
+
+    // accumulate into predictedPosition directly
+    particlesIn[pi.originalIndex].predictedPosition += delta;
+}

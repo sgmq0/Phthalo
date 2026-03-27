@@ -73,6 +73,9 @@ public:
     // lambda calculation kernel
     ComPtr<ID3D12PipelineState> m_psoComputeLambda;
 
+    // delta kernel
+    ComPtr<ID3D12PipelineState> m_psoComputeDelta;
+
     // readback
     ComPtr<ID3D12Resource> m_nsReadbackCellCount;
     ComPtr<ID3D12Resource> m_nsReadbackCellStart;
