@@ -16,7 +16,9 @@ struct GPUParticle {
     float density;
     float lambda;
     int originalIndex;
-    float _pad[2];
+    float2 _pad2;
+    float3 xsph;
+    float _pad3;
 };
 
 cbuffer NSConstants : register(b0) {
@@ -276,7 +278,7 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
     float constraint = (density / RHO_0) - 1.0f;
 
     // write to originalIndex so CPU-side m_particles[originalIndex] stays in sync
-    particlesIn[i].lambda = -constraint / denominator;
+    particlesIn[pi.originalIndex].lambda = -constraint / denominator;
     //particlesIn[i].lambda = test;
 }
 
@@ -313,7 +315,7 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
         int3 nc = cell + int3(dx, dy, dz);
         if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
 
-        int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+        int flat = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
         int start = cellStart[flat];
         int cellN = cellCount[flat];
 
@@ -338,4 +340,78 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
 
     // accumulate into predictedPosition directly
     particlesIn[pi.originalIndex].predictedPosition += delta;
+}
+
+[numthreads(64, 1, 1)]
+void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    // particlesOut is sorted, particlesIn is original-order
+    // we iterate over sorted neighbors via the grid, same as before
+    GPUParticle pi = particlesOut[i];
+    float3 pos_i = pi.predictedPosition;
+    float3 vel_i = pi.velocity;
+
+    int3 cell = clamp(
+        (int3) floor((pos_i - gridOrigin) / cellSize),
+        int3(0, 0, 0),
+        gridDim - int3(1, 1, 1)
+    );
+
+    // 1: compute density
+    float density = 0.0f;
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                int3 nc = cell + int3(dx, dy, dz);
+                if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
+                int flat = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+                int start = cellStart[flat];
+                int cellN = cellCount[flat];
+                for (int k = 0; k < cellN; k++)
+                {
+                    float3 r = pos_i - particlesOut[start + k].predictedPosition;
+                    density += Poly6(r, H);
+                }
+            }
+        }
+    }
+
+    // guard against zero density
+    float invDensity = (density > 1e-6f) ? (1.0f / density) : 0.0f;
+
+    // 2: XSPH viscosity
+    float3 pos_i_cur = particlesIn[pi.originalIndex].position;
+
+    float3 xsph = float3(0, 0, 0);
+
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                int3 nc = cell + int3(dx, dy, dz);
+                if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
+                int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+                int start = cellStart[flat];
+                int cellN = cellCount[flat];
+                for (int k = 0; k < cellN; k++)
+                {
+                    GPUParticle pj = particlesOut[start + k];
+                    float3 pos_j_cur = particlesIn[pj.originalIndex].position;
+
+                    float3 r = pos_i_cur - pos_j_cur;
+                    float val = Poly6(r, H);
+
+                    float3 vel_j = pj.velocity;
+                    xsph += invDensity * val * (vel_j - vel_i);
+                }
+            }
+        }
+    }
+
+    // write xsph 
+    particlesIn[pi.originalIndex].density = density;
+    particlesIn[pi.originalIndex].xsph = xsph;
 }

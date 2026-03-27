@@ -15,6 +15,8 @@ ParticleSystem::ParticleSystem(UINT numParticles) :
 
 void ParticleSystem::LoadParticles()
 {
+    m_particles.resize(NUM_PARTICLES);
+
 	// initializes all the particles
 	float spacing = 0.3f;
     int perAxis = (int)cbrt(NUM_PARTICLES);
@@ -113,6 +115,9 @@ void ParticleSystem::CreateComputePipeline(
 
     ComPtr<ID3DBlob> computeDelta = CompileHelper(shaderPath, "CSComputeDelta");
     m_psoComputeDelta = MakePSOHelper(computeDelta.Get(), m_computeRootSignature.Get(), device);
+
+    ComPtr<ID3DBlob> computeXSPH = CompileHelper(shaderPath, "CSComputeXSPH");
+    m_psoComputeXSPH = MakePSOHelper(computeXSPH.Get(), m_computeRootSignature.Get(), device);
 
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
@@ -213,6 +218,12 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
     auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
     cmdList->ResourceBarrier(1, &b2);
+
+    // compute xsph
+    cmdList->SetPipelineState(m_psoComputeXSPH.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    cmdList->ResourceBarrier(1, &b3);
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
@@ -263,6 +274,7 @@ void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, floa
         gpu[i].velocity = m_particles[i].velocity;
         gpu[i].density = m_particles[i].density;
         gpu[i].lambda = m_particles[i].lambda;
+        gpu[i].xsph = m_particles[i].xsph;
     }
 
     void* mapped = nullptr;
@@ -338,107 +350,6 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     D3D12_RESOURCE_BARRIER reorderBarrier =
         CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesOut.Get());
     cmdList->ResourceBarrier(1, &reorderBarrier);
-}
-
-void ParticleSystem::ValidatePrefixSum(
-    ID3D12GraphicsCommandList* cmdList,
-    ID3D12CommandQueue* cmdQueue,
-    ID3D12Fence* fence,
-    UINT64& fenceValue,
-    HANDLE fenceEvent)
-{
-    // copy both buffers to readback
-    D3D12_RESOURCE_BARRIER toSrc[2] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE),
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE),
-    };
-    cmdList->ResourceBarrier(2, toSrc);
-
-    cmdList->CopyResource(m_nsReadbackCellCount.Get(), m_nsCellCount.Get());
-    cmdList->CopyResource(m_nsReadbackCellStart.Get(), m_nsCellStart.Get());
-
-    D3D12_RESOURCE_BARRIER toUAV[2] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-    };
-    cmdList->ResourceBarrier(2, toUAV);
-
-    ThrowIfFailed(cmdList->Close());
-    ID3D12CommandList* lists[] = { cmdList };
-    cmdQueue->ExecuteCommandLists(1, lists);
-    fenceValue++;
-    ThrowIfFailed(cmdQueue->Signal(fence, fenceValue));
-    ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
-    WaitForSingleObjectEx(fenceEvent, INFINITE, FALSE);
-
-    // map both
-    int* counts = nullptr;
-    int* starts = nullptr;
-    CD3DX12_RANGE range(0, NS_NUM_CELLS * sizeof(int));
-    m_nsReadbackCellCount->Map(0, &range, reinterpret_cast<void**>(&counts));
-    m_nsReadbackCellStart->Map(0, &range, reinterpret_cast<void**>(&starts));
-
-    char buf[128];
-
-    // test 1: cellStart[0] == 0
-    sprintf_s(buf, "[PREFIX] cellStart[0] = %d (expected 0)\n", starts[0]);
-    OutputDebugStringA(buf);
-
-    // test 2: cellStart[i] + cellCount[i] == cellStart[i+1] for every i
-    bool prefixOK = true;
-    int firstBadCell = -1;
-    for (int i = 0; i < NS_NUM_CELLS - 1; i++) {
-        if (starts[i] + counts[i] != starts[i + 1]) {
-            prefixOK = false;
-            firstBadCell = i;
-            break;
-        }
-    }
-
-    if (prefixOK) {
-        OutputDebugStringA("[PREFIX] prefix sum OK\n");
-    } else {
-        sprintf_s(buf, "[PREFIX] BROKEN at cell %d: start=%d count=%d sum=%d but next start=%d\n",
-            firstBadCell,
-            starts[firstBadCell],
-            counts[firstBadCell],
-            starts[firstBadCell] + counts[firstBadCell],
-            starts[firstBadCell + 1]);
-        OutputDebugStringA(buf);
-    }
-
-    // test 3: last cell's start + count == NUM_PARTICLES
-    int last = NS_NUM_CELLS - 1;
-    sprintf_s(buf, "[PREFIX] cellStart[last]+count = %d (expected %d)\n",
-        starts[last] + counts[last], (int)NUM_PARTICLES);
-    OutputDebugStringA(buf);
-
-    // print the non-empty cells so you can eyeball the starts
-    OutputDebugStringA("[PREFIX] non-empty cells:\n");
-    int printed = 0;
-    for (int i = 0; i < NS_NUM_CELLS && printed < 16; i++) {
-        if (counts[i] > 0) {
-            sprintf_s(buf, "[PREFIX]   cell[%d]: start=%d count=%d end=%d\n",
-                i, starts[i], counts[i], starts[i] + counts[i]);
-            OutputDebugStringA(buf);
-            printed++;
-        }
-    }
-
-    m_nsReadbackCellCount->Unmap(0, nullptr);
-    m_nsReadbackCellStart->Unmap(0, nullptr);
 }
 
 // --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
@@ -567,11 +478,11 @@ void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
         reinterpret_cast<void**>(&readback));
 
     for (int i = 0; i < NUM_PARTICLES; i++) {
-        m_particles[readback[i].originalIndex].predictedPosition = readback[i].predictedPosition;
-        m_particles[readback[i].originalIndex].velocity = readback[i].velocity;
-        m_particles[readback[i].originalIndex].lambda = readback[i].lambda;
+        m_particles[i].predictedPosition = readback[i].predictedPosition;
+        m_particles[i].velocity = readback[i].velocity;
+        m_particles[i].lambda = readback[i].lambda;
+        m_particles[i].xsph = readback[i].xsph;
     }
-    std::cout << m_particles[1].lambda << std::endl;
 
     CD3DX12_RANGE writeRange(0, 0);
     m_nsReadbackParticlesIn->Unmap(0, &writeRange);
@@ -581,138 +492,46 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
 
     if (dt <= 0.0f) return;  // skip PBD on frame 1
 
+    // put this into the constant buffer later....
 	const float radius      = 1.0f;
     const float radius2     = radius * radius;
     const float rho_0       = 10.0f;       // rest density
     const float epsilon     = 100.0f;
     const float damping     = 0.999f;
-    const float boxSize     = 3.0f;
+    const float boxSize     = 10.0f;
     const float restitution = 0.3f;
     const float viscosity   = 0.05f;
     const int iterations    = 3;
 
-	// calculations for all particles
-    std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
-    for (int iter = 0; iter < iterations; iter++) {
-
-        // for all particles, calculate lambda_i
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-            
-            // ------------ STEP 3 : COMPUTE DENSITIES rho_i --------------
-            float rho_i = ComputeDensityConstraint(i, radius);
-
-            // ------------ STEP 4 : COMPUTE LAMBDA --------------
-            float constraint = (rho_i / rho_0) - 1.0; // numerator
-            float denominator = 0.0;
-            for (int j : m_particles[i].neighbors) {
-                XMFLOAT3 gradConstraint = ComputeGradiantConstraint(i, j, rho_0, radius);
-                denominator += SquaredNorm(gradConstraint);
-            }
-
-            // add an epislon value for relaxation
-            denominator += epsilon;
-            m_particles[i].lambda = -constraint / denominator;
-        }
-
-        // ------------ STEP 5 : COMPUTE DENSITIES DELTA RHO --------------
-
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-            Particle p = m_particles[i];
-
-            // artifical tensile pressure correction constants
-            const float corr_n = 4.0;
-            const float corr_h = 0.30;
-            const float corr_k = 1e-04;
-            const float corr_w = Poly6(XMFLOAT3(corr_h * radius, 0.0, 0.0), radius);
-
-            float sum_x = 0.0;
-            float sum_y = 0.0;
-            float sum_z = 0.0;
-
-            for (int j : p.neighbors) {
-                Particle p_neighbor = m_particles[j];
-
-                // artificial tensile pressure correction 
-                const float poly = Poly6(SubtractFloat3(p.predictedPosition, p_neighbor.predictedPosition), radius);
-                const float ratio = poly / corr_w;
-                const float corr_coeff = -corr_k * pow(ratio, corr_n);
-                const float coeff = p.lambda + p_neighbor.lambda + corr_coeff;
-
-                XMFLOAT3 sum = SpikyGradient(SubtractFloat3(p.predictedPosition, p_neighbor.predictedPosition), radius);
-                sum_x += sum.x * coeff;
-                sum_y += sum.y * coeff;
-                sum_z += sum.z * coeff;
-            }
-
-            float rho_coeff = 1.0 / rho_0;
-            XMFLOAT3 sum_vec = XMFLOAT3(rho_coeff * sum_x, rho_coeff * sum_y, rho_coeff * sum_z);
-
-            // solve for delta rho
-            deltas[i].x += sum_vec.x;
-            deltas[i].y += sum_vec.y;
-            deltas[i].z += sum_vec.z;
-        }
-
-        // ------------ STEP 6 : APPLY DELTA RHO --------------
-		for (int i = 0; i < NUM_PARTICLES; i++) {
-			m_particles[i].predictedPosition.x += deltas[i].x;
-			m_particles[i].predictedPosition.y += deltas[i].y;
-			m_particles[i].predictedPosition.z += deltas[i].z;
-		}
-    }
-
-    std::vector<float> densities(NUM_PARTICLES, 0.0f);
-    for (int i = 0; i < NUM_PARTICLES; i++) {
-        densities[i] = ComputeDensityConstraint(i, radius);
-    }
-
-    // XSPH viscosity computation
-    std::vector<XMFLOAT3> xsph(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});
-    for (int i = 0; i < NUM_PARTICLES; i++) {
-        for (int j : m_particles[i].neighbors) {
-            float val = Poly6(SubtractFloat3(m_particles[i].position, m_particles[j].position), radius);
-            XMFLOAT3 velocity = SubtractFloat3(m_particles[j].velocity, m_particles[i].velocity);
-
-            float coeff = 1.0f / densities[i];
-            xsph[i].x += coeff * val * velocity.x;
-            xsph[i].y += coeff * val * velocity.y;
-            xsph[i].z += coeff * val * velocity.z;
-        }
-    }
-
 	// update positions and velocity
 	for (int i = 0; i < NUM_PARTICLES; i++) {
         XMFLOAT3& pred = m_particles[i].predictedPosition;
+        XMFLOAT3& pos  = m_particles[i].position;
 
-        // constraints
-        pred.x = max(pred.x, -boxSize); 
-        pred.x = min(pred.x, boxSize);
-        pred.y = max(pred.y, 0.0f); 
-        pred.y = min(pred.y, 8.0f);
-        pred.z = max(pred.z, -boxSize); 
-        pred.z = min(pred.z, boxSize);
+        // clamp predicted position to box
+        pred.x = std::clamp(pred.x, -boxSize, boxSize);
+        pred.y = std::clamp(pred.y,     0.0f,   100.0f);
+        pred.z = std::clamp(pred.z, -boxSize, boxSize);
 
-        // in the finalize loop, after clamping
-        if (pred.y <= 0.0f) m_particles[i].velocity.y = 0.0f;
-        if (pred.y >= 8.0f) m_particles[i].velocity.y = 0.0f;
-        if (abs(pred.x) >= boxSize) m_particles[i].velocity.x = 0.0f;
-        if (abs(pred.z) >= boxSize) m_particles[i].velocity.z = 0.0f;
+        // derive velocity from the displacement (this is PBD -- velocity comes last)
+        m_particles[i].velocity.x = damping * (pred.x - pos.x) / dt;
+        m_particles[i].velocity.y = damping * (pred.y - pos.y) / dt;
+        m_particles[i].velocity.z = damping * (pred.z - pos.z) / dt;
 
-        // update velocity
-        m_particles[i].velocity.x = damping * (pred.x - m_particles[i].position.x) / dt;
-		m_particles[i].velocity.y = damping * (pred.y - m_particles[i].position.y) / dt;
-		m_particles[i].velocity.z = damping * (pred.z - m_particles[i].position.z) / dt;
+        // kill the component pointing INTO the wall, after velocity is computed
+        if (pred.x <= -boxSize && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
+        if (pred.x >=  boxSize && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
+        if (pred.y <=    0.0f  && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
+        if (pred.z <= -boxSize && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
+        if (pred.z >=  boxSize && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
 
-        // apply XSPH velocity
-        m_particles[i].velocity.x += xsph[i].x * viscosity;
-        m_particles[i].velocity.y += xsph[i].y * viscosity;
-        m_particles[i].velocity.z += xsph[i].z * viscosity;
+        // apply XSPH (fix: use per-axis components)
+        m_particles[i].velocity.x += m_particles[i].xsph.x * viscosity;
+        m_particles[i].velocity.y += m_particles[i].xsph.y * viscosity;
+        m_particles[i].velocity.z += m_particles[i].xsph.z * viscosity;
 
-        // TODO: vorticity confinement
-
-        // update position 
-		m_particles[i].position = pred;
-	}
+        pos = pred;
+        }
 
 	UpdateInstances();
 }

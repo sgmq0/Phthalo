@@ -19,8 +19,8 @@ public:
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
-    static const UINT NUM_PARTICLES = 10000;
-    Particle m_particles[NUM_PARTICLES];
+    static const UINT NUM_PARTICLES = 50000;
+    std::vector<Particle> m_particles;
 
     Instancer m_instancer;
 
@@ -76,18 +76,14 @@ public:
     // delta kernel
     ComPtr<ID3D12PipelineState> m_psoComputeDelta;
 
+    // xsph kernel
+    ComPtr<ID3D12PipelineState> m_psoComputeXSPH;
+
     // readback
     ComPtr<ID3D12Resource> m_nsReadbackCellCount;
     ComPtr<ID3D12Resource> m_nsReadbackCellStart;
     ComPtr<ID3D12Resource> m_nsReadbackParticlesOut;
     ComPtr<ID3D12Resource> m_nsReadbackParticlesIn;
-
-    void ParticleSystem::ValidatePrefixSum(
-        ID3D12GraphicsCommandList* cmdList,
-        ID3D12CommandQueue* cmdQueue,
-        ID3D12Fence* fence,
-        UINT64& fenceValue,
-        HANDLE fenceEvent);
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
