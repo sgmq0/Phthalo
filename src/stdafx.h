@@ -59,6 +59,7 @@ struct NSConstants {
     int gridDimZ;
     int numParticles;
     int numCells;
-    int _pad[3];
+    float dt;
+    int _pad[2];
 };
 

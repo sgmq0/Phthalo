@@ -119,6 +119,9 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3DBlob> computeXSPH = CompileHelper(shaderPath, "CSComputeXSPH");
     m_psoComputeXSPH = MakePSOHelper(computeXSPH.Get(), m_computeRootSignature.Get(), device);
 
+    ComPtr<ID3DBlob> finalize = CompileHelper(shaderPath, "CSFinalize");
+    m_psoComputeFinalize = MakePSOHelper(finalize.Get(), m_computeRootSignature.Get(), device);
+
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
     m_nsCellCount = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
@@ -224,6 +227,12 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
     auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
     cmdList->ResourceBarrier(1, &b3);
+
+    // finalize
+    // cmdList->SetPipelineState(m_psoComputeFinalize.Get());
+    // cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    // auto b4 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    // cmdList->ResourceBarrier(1, &b4);
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
@@ -531,7 +540,7 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
         m_particles[i].velocity.z += m_particles[i].xsph.z * viscosity;
 
         pos = pred;
-        }
+    }
 
 	UpdateInstances();
 }

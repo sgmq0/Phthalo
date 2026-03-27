@@ -19,7 +19,7 @@ public:
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
-    static const UINT NUM_PARTICLES = 50000;
+    static const UINT NUM_PARTICLES = 30000;
     std::vector<Particle> m_particles;
 
     Instancer m_instancer;
@@ -78,6 +78,9 @@ public:
 
     // xsph kernel
     ComPtr<ID3D12PipelineState> m_psoComputeXSPH;
+
+    // kernel that performs all the final operations
+    ComPtr<ID3D12PipelineState> m_psoComputeFinalize;
 
     // readback
     ComPtr<ID3D12Resource> m_nsReadbackCellCount;

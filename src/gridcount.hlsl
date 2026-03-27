@@ -48,6 +48,16 @@ static const float H       = 1.0f;
 static const float RHO_0   = 10.0f;
 static const float EPSILON  = 100.0f;
 
+static const float radius      = 1.0f;
+static const float radius2     = radius * radius;
+static const float rho_0       = 10.0f;
+static const float epsilon     = 100.0f;
+static const float damping     = 0.999f;
+static const float boxSizeXZ   = 10.0f;
+static const float boxSizeY    = 100.0f;
+static const float restitution = 0.3f;
+static const float viscosity   = 0.05f;
+
 float Poly6(float3 r, float h)
 {
     float r2 = dot(r, r);
@@ -414,4 +424,36 @@ void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)
     // write xsph 
     particlesIn[pi.originalIndex].density = density;
     particlesIn[pi.originalIndex].xsph = xsph;
+}
+
+[numthreads(64, 1, 1)]
+void CSFinalize(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    float3 pred = particlesIn[i].predictedPosition;
+    float3 pos = particlesIn[i].position;
+
+    // clamp to box
+    pred.x = clamp(pred.x, -boxSizeXZ, boxSizeXZ);
+    pred.y = clamp(pred.y, 0.0f, boxSizeY);
+    pred.z = clamp(pred.z, -boxSizeXZ, boxSizeXZ);
+
+    // derive velocity from displacement
+    float3 vel = damping * (pred - pos) / dt;
+
+    // kill velocity pointing into walls
+    if (pred.x <= -boxSizeXZ && vel.x < 0.0f) vel.x = 0.0f;
+    if (pred.x >=  boxSizeXZ && vel.x > 0.0f) vel.x = 0.0f;
+    if (pred.y <= 0.0f && vel.y < 0.0f) vel.y = 0.0f;
+    if (pred.z <= -boxSizeXZ && vel.z < 0.0f) vel.z = 0.0f;
+    if (pred.z >=  boxSizeXZ && vel.z > 0.0f) vel.z = 0.0f;
+
+    // apply XSPH
+    vel += float3(particlesIn[i].xsph) * viscosity;
+
+    particlesIn[i].predictedPosition = pred;
+    particlesIn[i].velocity = vel;
+    particlesIn[i].position = pred;
 }
