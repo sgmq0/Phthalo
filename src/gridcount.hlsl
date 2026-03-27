@@ -176,17 +176,10 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
 
             int status = packed >> STATUS_SHIFT;
             int value  = (int) (packed & VALUE_MASK);
+            exclusivePrefix += value;
 
-            if (status == 2)
-            {
-                exclusivePrefix += value;
-                break;
-            }
-            else
-            {
-                exclusivePrefix += value;
-                lookIdx--;
-            }
+            if (status == 2) break;  // got a final inclusive prefix, stop
+            lookIdx--;
         }
 
         // write into the groupshared variable so all threads can read it
@@ -227,6 +220,8 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
     int i = (int)tid.x;
     if (i >= numParticles) return;
 
+    //particlesIn[i].lambda = 999.0f;
+
     // particlesOut is sorted by cell — each thread handles one sorted slot
     GPUParticle pi = particlesOut[i];
     float3 pos_i = pi.predictedPosition;
@@ -241,6 +236,7 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
     float density    = 0.0f;
     float3 gradSum_i = float3(0, 0, 0);  // sum of gradients w.r.t. i (self term)
     float denominator = 0.0f;
+    float test = 5.0f;
 
     for (int dx = -1; dx <= 1; dx++)
     for (int dy = -1; dy <= 1; dy++)
@@ -262,11 +258,13 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
             density += Poly6(r, H);
 
             // gradient of constraint w.r.t. k=j (eq. 8 denominator, k != i term)
-            float3 grad_j = -SpikyGradient(r, H) / RHO_0;
+            float3 grad_j = SpikyGradient(r, H) / RHO_0;
             denominator  += dot(grad_j, grad_j);
 
             // accumulate self-term gradient (k == i means sum over all j)
             gradSum_i += SpikyGradient(r, H);
+
+            test += 1.0f;
         }
     }
 
@@ -278,5 +276,6 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
     float constraint = (density / RHO_0) - 1.0f;
 
     // write to originalIndex so CPU-side m_particles[originalIndex] stays in sync
-    particlesIn[pi.originalIndex].lambda = -constraint / denominator;
+    particlesIn[i].lambda = -constraint / denominator;
+    //particlesIn[i].lambda = test;
 }

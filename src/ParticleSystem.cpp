@@ -109,7 +109,7 @@ void ParticleSystem::CreateComputePipeline(
     m_psoReorder = MakePSOHelper(reorder.Get(), m_computeRootSignature.Get(), device);
 
     ComPtr<ID3DBlob> computeLambda = CompileHelper(shaderPath, "CSComputeLambda");
-    m_psoComputeLambda = MakePSOHelper(prediction.Get(), m_computeRootSignature.Get(), device);
+    m_psoComputeLambda = MakePSOHelper(computeLambda.Get(), m_computeRootSignature.Get(), device);
 
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
@@ -252,9 +252,8 @@ void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, floa
         gpu[i].velocity = m_particles[i].velocity;
         gpu[i].density = m_particles[i].density;
         gpu[i].lambda = m_particles[i].lambda;
-
-        std::cout << gpu[i].lambda << std::endl;
     }
+
     void* mapped = nullptr;
     m_nsUploadBuffer->Map(0, nullptr, &mapped);
     memcpy(mapped, gpu.data(), NUM_PARTICLES * sizeof(GPUParticle));
@@ -559,7 +558,9 @@ void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
     for (int i = 0; i < NUM_PARTICLES; i++) {
         m_particles[readback[i].originalIndex].predictedPosition = readback[i].predictedPosition;
         m_particles[readback[i].originalIndex].velocity = readback[i].velocity;
+        m_particles[readback[i].originalIndex].lambda = readback[i].lambda;
     }
+    std::cout << m_particles[1].lambda << std::endl;
 
     CD3DX12_RANGE writeRange(0, 0);
     m_nsReadbackParticlesIn->Unmap(0, &writeRange);
