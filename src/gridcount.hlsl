@@ -24,14 +24,15 @@ cbuffer NSConstants : register(b0) {
     int3   gridDim;
     int    numParticles;
     int    numCells;
-    int3   _pad;
+    float  dt;
+    int2   _pad;
 };
 
-RWStructuredBuffer<int>        cellCount   : register(u0);
-RWStructuredBuffer<int>        intraOffset : register(u1);
-RWStructuredBuffer<GPUParticle> particlesIn : register(u2);
-RWStructuredBuffer<int> cellStart : register(u3);
-RWStructuredBuffer<uint> statusBuf : register(u4);
+RWStructuredBuffer<int> cellCount            : register(u0);
+RWStructuredBuffer<int> intraOffset          : register(u1);
+RWStructuredBuffer<GPUParticle> particlesIn  : register(u2);
+RWStructuredBuffer<int> cellStart            : register(u3);
+RWStructuredBuffer<uint> statusBuf           : register(u4);
 RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 
 #define STATUS_SHIFT 30
@@ -39,6 +40,20 @@ RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 #define TILE 256
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
+
+[numthreads(64, 1, 1)]
+void CSPrediction(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    // apply gravity
+    particlesIn[i].velocity.y += -9.8f * dt;
+
+    // predict position
+    particlesIn[i].predictedPosition = particlesIn[i].position
+        + dt * particlesIn[i].velocity;
+}
 
 // step 1 - counting kernel
 

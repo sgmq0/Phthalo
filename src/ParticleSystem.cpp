@@ -72,8 +72,6 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3D12GraphicsCommandList> &commandList)
 {
     // 1. root signature
-    // CD3DX12_ROOT_PARAMETER params[1];
-    // params[0].InitAsUnorderedAccessView(0);
 
     CD3DX12_ROOT_PARAMETER params[7];
     params[0].InitAsConstantBufferView(0);  // b0: NSConstants
@@ -85,7 +83,6 @@ void ParticleSystem::CreateComputePipeline(
     params[6].InitAsUnorderedAccessView(5); // u5: particlesOut
 
     CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
-    //rootDesc.NumParameters = 1;
     rootDesc.NumParameters = 7;
     rootDesc.pParameters = params;
     rootDesc.NumStaticSamplers = 0;
@@ -96,14 +93,15 @@ void ParticleSystem::CreateComputePipeline(
     ThrowIfFailed(device->CreateRootSignature(0, sig->GetBufferPointer(),
         sig->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)));
 
-    // 2. compile shaders
+    // 2/3. compile shaders & pipeline states
+    ComPtr<ID3DBlob> prediction = CompileHelper(shaderPath, "CSPrediction");
+    m_psoPrediction = MakePSOHelper(prediction.Get(), m_computeRootSignature.Get(), device);
+
     ComPtr<ID3DBlob> clearCells = CompileHelper(shaderPath, "CSClearCells");
     ComPtr<ID3DBlob> count = CompileHelper(shaderPath, "CSCounting");
     ComPtr<ID3DBlob> clearStatus = CompileHelper(shaderPath, "CSClearStatus");
     ComPtr<ID3DBlob> prefixSum = CompileHelper(shaderPath, "CSPrefixSum");
     ComPtr<ID3DBlob> reorder = CompileHelper(shaderPath, "CSReorder");
-
-    // 3. set pipeline states
     m_psoClear = MakePSOHelper(clearCells.Get(), m_computeRootSignature.Get(), device);
     m_psoCount = MakePSOHelper(count.Get(), m_computeRootSignature.Get(), device);
     m_psoClearStatus = MakePSOHelper(clearStatus.Get(), m_computeRootSignature.Get(), device);
@@ -169,6 +167,15 @@ void ParticleSystem::CreateComputePipeline(
             IID_PPV_ARGS(&m_nsReadbackParticlesOut)));
     }
 
+    {
+        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(NUM_PARTICLES * sizeof(GPUParticle));
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&m_nsReadbackParticlesIn))); // new ComPtr member
+    }
+
     // 5. command allocator + list
     ThrowIfFailed(device->CreateCommandAllocator(
         D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&commandAllocator)));
@@ -182,57 +189,39 @@ void ParticleSystem::CreateComputePipeline(
     std::cout << "compute pipeline created" << std::endl;
 }
 
-void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
+void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, float dt)
 {
+    DispatchInit(cmdList, dt);
+    DispatchPrediction(cmdList, dt);
+    DispatchNeighborSearch(cmdList);
+}
+
+void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
+{
+
     // upload constants
-    {
-        struct NSConstants {
-            XMFLOAT3 gridOrigin; float cellSize;
-            int gridDimX, gridDimY, gridDimZ;
-            int numParticles, numCells;
-            int _pad[3];
-        };
-        NSConstants cb;
-        cb.gridOrigin = XMFLOAT3(-3.5f, 0.0f, -3.5f);
-        cb.cellSize = 1.0f;  // smoothing radius
-        cb.gridDimX = NS_GRID_DIM_X;
-        cb.gridDimY = NS_GRID_DIM_Y;
-        cb.gridDimZ = NS_GRID_DIM_Z;
-        cb.numParticles = (int)NUM_PARTICLES;
-        cb.numCells = NS_NUM_CELLS;
-        void* mapped = nullptr;
-        m_nsConstantBuffer->Map(0, nullptr, &mapped);
-        memcpy(mapped, &cb, sizeof(cb));
-        m_nsConstantBuffer->Unmap(0, nullptr);
-    }
+    struct NSConstants {
+        XMFLOAT3 gridOrigin; float cellSize;
+        int gridDimX, gridDimY, gridDimZ;
+        int numParticles;
+        int numCells;
+        float dt;
+        int _pad[2];
+    };
+    NSConstants cb;
+    cb.gridOrigin = XMFLOAT3(-3.5f, 0.0f, -3.5f);
+    cb.cellSize = 1.0f;  // smoothing radius
+    cb.gridDimX = NS_GRID_DIM_X;
+    cb.gridDimY = NS_GRID_DIM_Y;
+    cb.gridDimZ = NS_GRID_DIM_Z;
+    cb.numParticles = (int)NUM_PARTICLES;
+    cb.numCells = NS_NUM_CELLS;
+    cb.dt = dt;
 
-    // upload particle positions to the gpu
-    {
-        std::vector<GPUParticle> gpu(NUM_PARTICLES);
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-            gpu[i].position          = m_particles[i].position;
-            gpu[i].predictedPosition = m_particles[i].predictedPosition;
-            gpu[i].velocity          = m_particles[i].velocity;
-            gpu[i].density           = m_particles[i].density;
-            gpu[i].lambda            = m_particles[i].lambda;
-        }
-        void* mapped = nullptr;
-        m_nsUploadBuffer->Map(0, nullptr, &mapped);
-        memcpy(mapped, gpu.data(), NUM_PARTICLES * sizeof(GPUParticle));
-        m_nsUploadBuffer->Unmap(0, nullptr);
-
-        auto toDst = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsParticlesIn.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_DEST);
-        cmdList->ResourceBarrier(1, &toDst);
-        cmdList->CopyResource(m_nsParticlesIn.Get(), m_nsUploadBuffer.Get());
-        auto toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsParticlesIn.Get(),
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        cmdList->ResourceBarrier(1, &toUAV);
-    }
+    void* mapped = nullptr;
+    m_nsConstantBuffer->Map(0, nullptr, &mapped);
+    memcpy(mapped, &cb, sizeof(cb));
+    m_nsConstantBuffer->Unmap(0, nullptr);
 
     // set root signature
     cmdList->SetComputeRootSignature(m_computeRootSignature.Get());
@@ -243,6 +232,66 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     cmdList->SetComputeRootUnorderedAccessView(4, m_nsCellStart->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(5, m_nsStatusBuf->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(6, m_nsParticlesOut->GetGPUVirtualAddress());
+}
+
+void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, float dt) {
+
+    // upload particle positions to the gpu
+    std::vector<GPUParticle> gpu(NUM_PARTICLES);
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        gpu[i].position          = m_particles[i].position;
+        gpu[i].predictedPosition = m_particles[i].predictedPosition;
+        gpu[i].velocity          = m_particles[i].velocity;
+        gpu[i].density           = m_particles[i].density;
+        gpu[i].lambda            = m_particles[i].lambda;
+    }
+    void* mapped = nullptr;
+    m_nsUploadBuffer->Map(0, nullptr, &mapped);
+    memcpy(mapped, gpu.data(), NUM_PARTICLES * sizeof(GPUParticle));
+    m_nsUploadBuffer->Unmap(0, nullptr);
+
+    // copy resource to gpu
+    auto toDst = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_nsParticlesIn.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COPY_DEST);
+    cmdList->ResourceBarrier(1, &toDst);
+    cmdList->CopyResource(m_nsParticlesIn.Get(), m_nsUploadBuffer.Get());
+    auto toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_nsParticlesIn.Get(),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    cmdList->ResourceBarrier(1, &toUAV);
+
+    // --- 3. Dispatch the prediction kernel ---
+    if (dt > 0.0f) {
+        cmdList->SetPipelineState(m_psoPrediction.Get());
+        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+
+        // barrier
+        auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+        cmdList->ResourceBarrier(1, &uavBarrier);
+    }
+
+    // transition particlesIn from UAV -> COPY_SOURCE
+    auto toCopySrc = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_nsParticlesIn.Get(),
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        D3D12_RESOURCE_STATE_COPY_SOURCE);
+    cmdList->ResourceBarrier(1, &toCopySrc);
+
+    cmdList->CopyResource(m_nsReadbackParticlesIn.Get(), m_nsParticlesIn.Get());
+
+    // transition back to UAV for the neighbor search that follows
+    auto backToUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+        m_nsParticlesIn.Get(),
+        D3D12_RESOURCE_STATE_COPY_SOURCE,
+        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    cmdList->ResourceBarrier(1, &backToUAV);
+}
+
+void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
+{
 
     // clear pass 
     cmdList->SetPipelineState(m_psoClear.Get());
@@ -376,9 +425,25 @@ XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, 
     }
 }
 
+void ParticleSystem::ReadbackParticleData()
+{
+    GPUParticle* readback = nullptr;
+    CD3DX12_RANGE readRange(0, NUM_PARTICLES * sizeof(GPUParticle));
+    m_nsReadbackParticlesIn->Map(0, &readRange,
+        reinterpret_cast<void**>(&readback));
 
-void ParticleSystem::Update(float dt, ID3D12GraphicsCommandList* cmdList) {
-    if (dt > 0.1f) return;
+    for (int i = 0; i < NUM_PARTICLES; i++) {
+        m_particles[i].predictedPosition = readback[i].predictedPosition;
+        m_particles[i].velocity = readback[i].velocity;
+    }
+
+    CD3DX12_RANGE writeRange(0, 0);
+    m_nsReadbackParticlesIn->Unmap(0, &writeRange);
+}
+
+void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
+
+    if (dt <= 0.0f) return;  // skip PBD on frame 1
 
 	const float radius      = 1.0f;
     const float radius2     = radius * radius;
@@ -389,25 +454,6 @@ void ParticleSystem::Update(float dt, ID3D12GraphicsCommandList* cmdList) {
     const float restitution = 0.3f;
     const float viscosity   = 0.05f;
     const int iterations    = 3;
-
-    // ------------ STEP 1: PREDICT POSITIONS --------------
-    if (dt > 0.0f) {
-        for (int i = 0; i < NUM_PARTICLES; i++) {
-
-            // apply forces
-            m_particles[i].velocity.y += -9.8f * dt;
-
-            // predict position
-            m_particles[i].predictedPosition.x = m_particles[i].position.x + dt * m_particles[i].velocity.x;
-            m_particles[i].predictedPosition.y = m_particles[i].position.y + dt * m_particles[i].velocity.y;
-            m_particles[i].predictedPosition.z = m_particles[i].position.z + dt * m_particles[i].velocity.z;
-        }
-    }
-
-	// ------------ STEP 2: FIND NEIGHBORS --------------
-	DispatchNeighborSearch(cmdList);
-
-    if (dt <= 0.0f) return;  // skip PBD on frame 1
 
 	// calculations for all particles
     std::vector<XMFLOAT3> deltas(NUM_PARTICLES, {0.0f, 0.0f, 0.0f});

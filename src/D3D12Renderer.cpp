@@ -49,8 +49,8 @@ void D3D12Renderer::OnUpdate()
 	ThrowIfFailed(m_computeCommandList->Reset(
 		m_computeAllocator.Get(), m_particleSystem.m_psoClear.Get()));
 
-	// record neighbor search commands
-	m_particleSystem.Update(dt, m_computeCommandList.Get());
+	// dispatch gpu commands
+	m_particleSystem.DispatchGPUCommands(m_computeCommandList.Get(), dt);
 
 	// close, execute, and wait
 	ThrowIfFailed(m_computeCommandList->Close());
@@ -63,6 +63,9 @@ void D3D12Renderer::OnUpdate()
 	ThrowIfFailed(m_computeFence->SetEventOnCompletion(
 		m_computeFenceValue, m_fenceEvent));
 	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
+
+	m_particleSystem.ReadbackParticleData();
+	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
 
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;
