@@ -9,13 +9,14 @@
 
 struct GPUParticle {
     float3 position;
-    float  _pad0;
+    float _pad0;
     float3 predictedPosition;
-    float  _pad1;
+    float _pad1;
     float3 velocity;
-    float  density;
-    float  lambda;
-    float3 _pad2;
+    float density;
+    float lambda;
+    int originalIndex;
+    float _pad[2];
 };
 
 cbuffer NSConstants : register(b0) {
@@ -40,6 +41,28 @@ RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 #define TILE 256
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
+
+static const float H       = 1.0f;
+static const float RHO_0   = 10.0f;
+static const float EPSILON  = 100.0f;
+
+float Poly6(float3 r, float h)
+{
+    float r2 = dot(r, r);
+    float h2 = h * h;
+    if (r2 > h2) return 0.0f;
+    float diff = h2 - r2;
+    return (315.0f / (64.0f * 3.14159265f)) / pow(h, 9) * diff * diff * diff;
+}
+
+float3 SpikyGradient(float3 r, float h)
+{
+    float rLen = length(r);
+    if (rLen > h || rLen < 1e-12f) return float3(0, 0, 0);
+    float diff = h - rLen;
+    float scalar = -(45.0f / (3.14159265f * pow(h, 6))) * diff * diff / rLen;
+    return r * scalar;
+}
 
 [numthreads(64, 1, 1)]
 void CSPrediction(uint3 tid : SV_DispatchThreadID)
@@ -194,6 +217,66 @@ void CSReorder(uint3 tid : SV_DispatchThreadID)
     int cell      = CellIndex(particlesIn[i].predictedPosition);
     int sortedIdx = cellStart[cell] + intraOffset[i];
 
+    particlesIn[i].originalIndex = i;
     particlesOut[sortedIdx] = particlesIn[i];
 }
 
+[numthreads(64, 1, 1)]
+void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    // particlesOut is sorted by cell — each thread handles one sorted slot
+    GPUParticle pi = particlesOut[i];
+    float3 pos_i = pi.predictedPosition;
+
+    // compute cell of this particle
+    int3 cell = clamp(
+        (int3)floor((pos_i - gridOrigin) / cellSize),
+        int3(0,0,0),
+        gridDim - int3(1,1,1)
+    );
+
+    float density    = 0.0f;
+    float3 gradSum_i = float3(0, 0, 0);  // sum of gradients w.r.t. i (self term)
+    float denominator = 0.0f;
+
+    for (int dx = -1; dx <= 1; dx++)
+    for (int dy = -1; dy <= 1; dy++)
+    for (int dz = -1; dz <= 1; dz++)
+    {
+        int3 nc = cell + int3(dx, dy, dz);
+        if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
+
+        int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+        int start = cellStart[flat];
+        int count = cellCount[flat];
+
+        for (int k = 0; k < count; k++)
+        {
+            float3 pos_j = particlesOut[start + k].predictedPosition;
+            float3 r     = pos_i - pos_j;
+
+            // density (Poly6)
+            density += Poly6(r, H);
+
+            // gradient of constraint w.r.t. k=j (eq. 8 denominator, k != i term)
+            float3 grad_j = -SpikyGradient(r, H) / RHO_0;
+            denominator  += dot(grad_j, grad_j);
+
+            // accumulate self-term gradient (k == i means sum over all j)
+            gradSum_i += SpikyGradient(r, H);
+        }
+    }
+
+    // add self-term (k == i) to denominator
+    float3 grad_i_self = gradSum_i / RHO_0;
+    denominator += dot(grad_i_self, grad_i_self);
+    denominator += EPSILON;
+
+    float constraint = (density / RHO_0) - 1.0f;
+
+    // write to originalIndex so CPU-side m_particles[originalIndex] stays in sync
+    particlesIn[pi.originalIndex].lambda = -constraint / denominator;
+}

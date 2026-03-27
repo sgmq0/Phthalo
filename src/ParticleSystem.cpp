@@ -108,6 +108,9 @@ void ParticleSystem::CreateComputePipeline(
     m_psoPrefixScanPass = MakePSOHelper(prefixSum.Get(), m_computeRootSignature.Get(), device);
     m_psoReorder = MakePSOHelper(reorder.Get(), m_computeRootSignature.Get(), device);
 
+    ComPtr<ID3DBlob> computeLambda = CompileHelper(shaderPath, "CSComputeLambda");
+    m_psoComputeLambda = MakePSOHelper(prediction.Get(), m_computeRootSignature.Get(), device);
+
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
     m_nsCellCount = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
@@ -194,6 +197,11 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     DispatchInit(cmdList, dt);
     DispatchPrediction(cmdList, dt);
     DispatchNeighborSearch(cmdList);
+
+    cmdList->SetPipelineState(m_psoComputeLambda.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    auto lambdaBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    cmdList->ResourceBarrier(1, &lambdaBarrier);
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
@@ -239,11 +247,13 @@ void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, floa
     // upload particle positions to the gpu
     std::vector<GPUParticle> gpu(NUM_PARTICLES);
     for (int i = 0; i < NUM_PARTICLES; i++) {
-        gpu[i].position          = m_particles[i].position;
+        gpu[i].position = m_particles[i].position;
         gpu[i].predictedPosition = m_particles[i].predictedPosition;
-        gpu[i].velocity          = m_particles[i].velocity;
-        gpu[i].density           = m_particles[i].density;
-        gpu[i].lambda            = m_particles[i].lambda;
+        gpu[i].velocity = m_particles[i].velocity;
+        gpu[i].density = m_particles[i].density;
+        gpu[i].lambda = m_particles[i].lambda;
+
+        std::cout << gpu[i].lambda << std::endl;
     }
     void* mapped = nullptr;
     m_nsUploadBuffer->Map(0, nullptr, &mapped);
@@ -272,27 +282,10 @@ void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, floa
         auto uavBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
         cmdList->ResourceBarrier(1, &uavBarrier);
     }
-
-    // transition particlesIn from UAV -> COPY_SOURCE
-    auto toCopySrc = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_nsParticlesIn.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-    cmdList->ResourceBarrier(1, &toCopySrc);
-
-    cmdList->CopyResource(m_nsReadbackParticlesIn.Get(), m_nsParticlesIn.Get());
-
-    // transition back to UAV for the neighbor search that follows
-    auto backToUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_nsParticlesIn.Get(),
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    cmdList->ResourceBarrier(1, &backToUAV);
 }
 
 void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
 {
-
     // clear pass 
     cmdList->SetPipelineState(m_psoClear.Get());
     cmdList->Dispatch((NS_NUM_CELLS + 63) / 64, 1, 1);
@@ -335,7 +328,107 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     D3D12_RESOURCE_BARRIER reorderBarrier =
         CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesOut.Get());
     cmdList->ResourceBarrier(1, &reorderBarrier);
+}
 
+void ParticleSystem::ValidatePrefixSum(
+    ID3D12GraphicsCommandList* cmdList,
+    ID3D12CommandQueue* cmdQueue,
+    ID3D12Fence* fence,
+    UINT64& fenceValue,
+    HANDLE fenceEvent)
+{
+    // copy both buffers to readback
+    D3D12_RESOURCE_BARRIER toSrc[2] = {
+        CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsCellCount.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_COPY_SOURCE),
+        CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsCellStart.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_STATE_COPY_SOURCE),
+    };
+    cmdList->ResourceBarrier(2, toSrc);
+
+    cmdList->CopyResource(m_nsReadbackCellCount.Get(), m_nsCellCount.Get());
+    cmdList->CopyResource(m_nsReadbackCellStart.Get(), m_nsCellStart.Get());
+
+    D3D12_RESOURCE_BARRIER toUAV[2] = {
+        CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsCellCount.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+        CD3DX12_RESOURCE_BARRIER::Transition(
+            m_nsCellStart.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+    };
+    cmdList->ResourceBarrier(2, toUAV);
+
+    ThrowIfFailed(cmdList->Close());
+    ID3D12CommandList* lists[] = { cmdList };
+    cmdQueue->ExecuteCommandLists(1, lists);
+    fenceValue++;
+    ThrowIfFailed(cmdQueue->Signal(fence, fenceValue));
+    ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
+    WaitForSingleObjectEx(fenceEvent, INFINITE, FALSE);
+
+    // map both
+    int* counts = nullptr;
+    int* starts = nullptr;
+    CD3DX12_RANGE range(0, NS_NUM_CELLS * sizeof(int));
+    m_nsReadbackCellCount->Map(0, &range, reinterpret_cast<void**>(&counts));
+    m_nsReadbackCellStart->Map(0, &range, reinterpret_cast<void**>(&starts));
+
+    char buf[128];
+
+    // test 1: cellStart[0] == 0
+    sprintf_s(buf, "[PREFIX] cellStart[0] = %d (expected 0)\n", starts[0]);
+    OutputDebugStringA(buf);
+
+    // test 2: cellStart[i] + cellCount[i] == cellStart[i+1] for every i
+    bool prefixOK = true;
+    int firstBadCell = -1;
+    for (int i = 0; i < NS_NUM_CELLS - 1; i++) {
+        if (starts[i] + counts[i] != starts[i + 1]) {
+            prefixOK = false;
+            firstBadCell = i;
+            break;
+        }
+    }
+
+    if (prefixOK) {
+        OutputDebugStringA("[PREFIX] prefix sum OK\n");
+    } else {
+        sprintf_s(buf, "[PREFIX] BROKEN at cell %d: start=%d count=%d sum=%d but next start=%d\n",
+            firstBadCell,
+            starts[firstBadCell],
+            counts[firstBadCell],
+            starts[firstBadCell] + counts[firstBadCell],
+            starts[firstBadCell + 1]);
+        OutputDebugStringA(buf);
+    }
+
+    // test 3: last cell's start + count == NUM_PARTICLES
+    int last = NS_NUM_CELLS - 1;
+    sprintf_s(buf, "[PREFIX] cellStart[last]+count = %d (expected %d)\n",
+        starts[last] + counts[last], (int)NUM_PARTICLES);
+    OutputDebugStringA(buf);
+
+    // print the non-empty cells so you can eyeball the starts
+    OutputDebugStringA("[PREFIX] non-empty cells:\n");
+    int printed = 0;
+    for (int i = 0; i < NS_NUM_CELLS && printed < 16; i++) {
+        if (counts[i] > 0) {
+            sprintf_s(buf, "[PREFIX]   cell[%d]: start=%d count=%d end=%d\n",
+                i, starts[i], counts[i], starts[i] + counts[i]);
+            OutputDebugStringA(buf);
+            printed++;
+        }
+    }
+
+    m_nsReadbackCellCount->Unmap(0, nullptr);
+    m_nsReadbackCellStart->Unmap(0, nullptr);
 }
 
 // --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
@@ -425,7 +518,38 @@ XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, 
     }
 }
 
-void ParticleSystem::ReadbackParticleData()
+void ParticleSystem::CopyBackResources(ID3D12GraphicsCommandList* cmdList) {
+    D3D12_RESOURCE_BARRIER toSrc[4] = {
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesOut.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellCount.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellStart.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
+    };
+    cmdList->ResourceBarrier(4, toSrc);
+
+    cmdList->CopyResource(m_nsReadbackParticlesOut.Get(), m_nsParticlesOut.Get());
+    cmdList->CopyResource(m_nsReadbackCellCount.Get(),    m_nsCellCount.Get());
+    cmdList->CopyResource(m_nsReadbackCellStart.Get(),    m_nsCellStart.Get());
+    cmdList->CopyResource(m_nsReadbackParticlesIn.Get(),  m_nsParticlesIn.Get());
+
+    D3D12_RESOURCE_BARRIER toUAV[4] = {
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesOut.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellCount.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellStart.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+    };
+    cmdList->ResourceBarrier(4, toUAV);
+}
+
+void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
 {
     GPUParticle* readback = nullptr;
     CD3DX12_RANGE readRange(0, NUM_PARTICLES * sizeof(GPUParticle));
@@ -433,8 +557,8 @@ void ParticleSystem::ReadbackParticleData()
         reinterpret_cast<void**>(&readback));
 
     for (int i = 0; i < NUM_PARTICLES; i++) {
-        m_particles[i].predictedPosition = readback[i].predictedPosition;
-        m_particles[i].velocity = readback[i].velocity;
+        m_particles[readback[i].originalIndex].predictedPosition = readback[i].predictedPosition;
+        m_particles[readback[i].originalIndex].velocity = readback[i].velocity;
     }
 
     CD3DX12_RANGE writeRange(0, 0);

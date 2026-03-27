@@ -51,6 +51,7 @@ void D3D12Renderer::OnUpdate()
 
 	// dispatch gpu commands
 	m_particleSystem.DispatchGPUCommands(m_computeCommandList.Get(), dt);
+	m_particleSystem.CopyBackResources(m_computeCommandList.Get());
 
 	// close, execute, and wait
 	ThrowIfFailed(m_computeCommandList->Close());
@@ -64,7 +65,22 @@ void D3D12Renderer::OnUpdate()
 		m_computeFenceValue, m_fenceEvent));
 	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
 
-	m_particleSystem.ReadbackParticleData();
+	// static bool validated = false;
+	// if (!validated) {
+	// 	ThrowIfFailed(m_computeAllocator->Reset());
+	// 	ThrowIfFailed(m_computeCommandList->Reset(
+	// 		m_computeAllocator.Get(), m_particleSystem.m_psoClear.Get()));
+
+	// 	m_particleSystem.ValidatePrefixSum(
+	// 		m_computeCommandList.Get(),
+	// 		m_computeCommandQueue.Get(),
+	// 		m_computeFence.Get(),
+	// 		m_computeFenceValue,
+	// 		m_fenceEvent);
+	// 	validated = true;
+	// }
+
+	m_particleSystem.ReadbackParticleData(m_computeCommandList.Get());
 	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
 
 	static float fpsTimer = 0.0f;

@@ -12,14 +12,14 @@ public:
     ParticleSystem(UINT numParticles);
 
     void LoadParticles();
-    void ReadbackParticleData();
+    void ReadbackParticleData(ID3D12GraphicsCommandList* cmdList);
     void UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList);
     void UpdateInstances();
 
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
-    static const UINT NUM_PARTICLES = 1000;
+    static const UINT NUM_PARTICLES = 10000;
     Particle m_particles[NUM_PARTICLES];
 
     Instancer m_instancer;
@@ -36,6 +36,8 @@ public:
     void DispatchInit(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchPrediction(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
+
+    void CopyBackResources(ID3D12GraphicsCommandList* cmdList);
 
     static constexpr int NS_GRID_DIM_X = 20;  // (-3 to +3) / cellSize = 0.35 -> 18, round up
     static constexpr int NS_GRID_DIM_Y = 26;  // 0 to 9 / 0.35 -> 26
@@ -68,11 +70,21 @@ public:
     ComPtr<ID3D12PipelineState> m_psoReorder;
     ComPtr<ID3D12Resource> m_nsParticlesOut;
 
+    // lambda calculation kernel
+    ComPtr<ID3D12PipelineState> m_psoComputeLambda;
+
     // readback
     ComPtr<ID3D12Resource> m_nsReadbackCellCount;
     ComPtr<ID3D12Resource> m_nsReadbackCellStart;
     ComPtr<ID3D12Resource> m_nsReadbackParticlesOut;
     ComPtr<ID3D12Resource> m_nsReadbackParticlesIn;
+
+    void ParticleSystem::ValidatePrefixSum(
+        ID3D12GraphicsCommandList* cmdList,
+        ID3D12CommandQueue* cmdQueue,
+        ID3D12Fence* fence,
+        UINT64& fenceValue,
+        HANDLE fenceEvent);
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;

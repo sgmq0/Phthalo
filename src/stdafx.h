@@ -44,7 +44,8 @@ struct GPUParticle {
     XMFLOAT3 velocity;
     float density;
     float lambda;
-    float _pad2[3];
+    int originalIndex;
+    float _pad2[2];
 };
 
 struct NSConstants {
