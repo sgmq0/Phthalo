@@ -32,7 +32,7 @@ RWStructuredBuffer<int>        intraOffset : register(u1);
 RWStructuredBuffer<GPUParticle> particlesIn : register(u2);
 
 RWStructuredBuffer<int> cellStart : register(u3);
-RWStructuredBuffer<int> statusBuf : register(u4);
+RWStructuredBuffer<uint> statusBuf : register(u4);
 
 #define STATUS_SHIFT 30
 #define VALUE_MASK   0x3FFFFFFF
@@ -74,7 +74,7 @@ void CSBindingTest(uint3 tid : SV_DispatchThreadID) {
 void CSClearStatus(uint3 tid : SV_DispatchThreadID) {
     uint numGroups = ((uint)numCells + 255) / 256;
     if ((int)tid.x < numGroups)
-        statusBuf[tid.x] = 0;
+        statusBuf[tid.x] = 0u;
 }
 
 [numthreads(TILE, 1, 1)]
@@ -89,13 +89,13 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
     */
 
     uint global = gid.x * TILE + tid.x;
-    int prev;
+    uint prev;
 
     // 1. load tile from cellCount into shared memory
     if (tid.x == 0)
         gs_exclusivePrefix = 0;
     GroupMemoryBarrierWithGroupSync();
-    
+
     gs[tid.x] = (global < (uint)numCells) ? cellCount[global] : 0;
     GroupMemoryBarrierWithGroupSync();
 
@@ -111,15 +111,14 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
     // 3. write local aggregate with status = 1 (partial)
     if (tid.x == 0)
     {
-        int localSum = gs[TILE - 1];
-        // group 0 already knows its inclusive prefix (no look-back needed)
+        uint localSum = (uint) gs[TILE - 1];
         if (gid.x == 0)
         {
-            InterlockedExchange(statusBuf[0], (2 << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
+            InterlockedExchange(statusBuf[0], (2u << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
         }
         else
         {
-            InterlockedExchange(statusBuf[gid.x], (1 << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
+            InterlockedExchange(statusBuf[gid.x], (1u << STATUS_SHIFT) | (localSum & VALUE_MASK), prev);
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -132,13 +131,13 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
 
         while (lookIdx >= 0)
         {
-            int packed;
+            uint packed;
             do {
-                InterlockedAdd(statusBuf[lookIdx], 0, packed);
-            } while ((packed >> STATUS_SHIFT) == 0);
+                InterlockedAdd(statusBuf[lookIdx], 0u, packed);
+            } while ((packed >> STATUS_SHIFT) == 0u);
 
             int status = packed >> STATUS_SHIFT;
-            int value  = packed & VALUE_MASK;
+            int value  = (int) (packed & VALUE_MASK);
 
             if (status == 2)
             {
