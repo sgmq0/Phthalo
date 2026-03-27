@@ -64,21 +64,6 @@ void D3D12Renderer::OnUpdate()
 		m_computeFenceValue, m_fenceEvent));
 	WaitForSingleObjectEx(m_fenceEvent, INFINITE, FALSE);
 
-	static bool validated = false;
-	if (!validated) {
-		ThrowIfFailed(m_computeAllocator->Reset());
-		ThrowIfFailed(m_computeCommandList->Reset(
-			m_computeAllocator.Get(), m_particleSystem.m_psoClear.Get()));
-
-		m_particleSystem.ValidatePrefixSum(
-			m_computeCommandList.Get(),
-			m_computeCommandQueue.Get(),
-			m_computeFence.Get(),
-			m_computeFenceValue,
-			m_fenceEvent);
-		validated = true;
-	}
-
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;
 	if (fpsTimer >= 0.5f)  // update twice per second so it's readable

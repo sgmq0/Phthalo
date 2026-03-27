@@ -102,8 +102,6 @@ private:
     ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
     ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
 
-    //void ReadbackCompute();
-    //void DispatchCompute();
 
     ComPtr<ID3D12Fence> m_computeFence;
     UINT64 m_computeFenceValue = 0;

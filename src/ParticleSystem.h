@@ -46,7 +46,6 @@ public:
     // first pass: counting kernel
     ComPtr<ID3D12PipelineState> m_psoClear;
     ComPtr<ID3D12PipelineState> m_psoCount;
-
     ComPtr<ID3D12Resource> m_nsCellCount;       // u0: int per cell, zeroed each frame
     ComPtr<ID3D12Resource> m_nsIntraOffset;     // u1: int per particle, slot within cell
     ComPtr<ID3D12Resource> m_nsParticlesIn;     // u2: GPUParticle upload target
@@ -54,26 +53,17 @@ public:
     // second pass: global prefix sum
     ComPtr<ID3D12PipelineState> m_psoClearStatus;
     ComPtr<ID3D12PipelineState> m_psoPrefixScanPass;
-
     ComPtr<ID3D12Resource> m_nsCellStart;       // u3: prefix sum output
     ComPtr<ID3D12Resource> m_nsStatusBuf;       // u4: scratch inter-group aggregates
+
+    // third pass: reorder
+    ComPtr<ID3D12PipelineState> m_psoReorder;
+    ComPtr<ID3D12Resource> m_nsParticlesOut;
 
     // readback
     ComPtr<ID3D12Resource> m_nsReadbackCellCount;
     ComPtr<ID3D12Resource> m_nsReadbackCellStart;
-
-    void ValidateCounting(
-        ID3D12GraphicsCommandList* cmdList,
-        ID3D12CommandQueue* cmdQueue,
-        ID3D12Fence* fence,
-        UINT64& fenceValue,
-        HANDLE fenceEvent);
-    void ParticleSystem::ValidatePrefixSum(
-        ID3D12GraphicsCommandList* cmdList,
-        ID3D12CommandQueue* cmdQueue,
-        ID3D12Fence* fence,
-        UINT64& fenceValue,
-        HANDLE fenceEvent);
+    ComPtr<ID3D12Resource> m_nsReadbackParticlesOut;
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;

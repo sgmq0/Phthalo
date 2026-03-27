@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "ParticleSystem.h"
 #include <iostream>
+#include <algorithm>
 
 ParticleSystem::ParticleSystem() :
     m_instancer(Instancer())
@@ -74,17 +75,18 @@ void ParticleSystem::CreateComputePipeline(
     // CD3DX12_ROOT_PARAMETER params[1];
     // params[0].InitAsUnorderedAccessView(0);
 
-    CD3DX12_ROOT_PARAMETER params[6];
+    CD3DX12_ROOT_PARAMETER params[7];
     params[0].InitAsConstantBufferView(0);  // b0: NSConstants
     params[1].InitAsUnorderedAccessView(0); // u0: cellCount
     params[2].InitAsUnorderedAccessView(1); // u1: intraOffset
     params[3].InitAsUnorderedAccessView(2);  // u2: particlesIn
     params[4].InitAsUnorderedAccessView(3); // u3: cellStart
     params[5].InitAsUnorderedAccessView(4); // u4: groupSums
+    params[6].InitAsUnorderedAccessView(5); // u5: particlesOut
 
     CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
     //rootDesc.NumParameters = 1;
-    rootDesc.NumParameters = 6;
+    rootDesc.NumParameters = 7;
     rootDesc.pParameters = params;
     rootDesc.NumStaticSamplers = 0;
     rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
@@ -97,26 +99,25 @@ void ParticleSystem::CreateComputePipeline(
     // 2. compile shaders
     ComPtr<ID3DBlob> clearCells = CompileHelper(shaderPath, "CSClearCells");
     ComPtr<ID3DBlob> count = CompileHelper(shaderPath, "CSCounting");
-
     ComPtr<ID3DBlob> clearStatus = CompileHelper(shaderPath, "CSClearStatus");
     ComPtr<ID3DBlob> prefixSum = CompileHelper(shaderPath, "CSPrefixSum");
+    ComPtr<ID3DBlob> reorder = CompileHelper(shaderPath, "CSReorder");
 
     // 3. set pipeline states
     m_psoClear = MakePSOHelper(clearCells.Get(), m_computeRootSignature.Get(), device);
     m_psoCount = MakePSOHelper(count.Get(), m_computeRootSignature.Get(), device);
-
     m_psoClearStatus = MakePSOHelper(clearStatus.Get(), m_computeRootSignature.Get(), device);
     m_psoPrefixScanPass = MakePSOHelper(prefixSum.Get(), m_computeRootSignature.Get(), device);
+    m_psoReorder = MakePSOHelper(reorder.Get(), m_computeRootSignature.Get(), device);
 
     // 4. all of the buffers
     m_nsParticlesIn = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
-
     m_nsCellCount = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
     m_nsIntraOffset = MakeBufferHelper(NUM_PARTICLES * sizeof(int), device);
-
     m_nsCellStart = MakeBufferHelper(NS_NUM_CELLS * sizeof(int), device);
     UINT numGroups = (NS_NUM_CELLS + 255) / 256;
     m_nsStatusBuf = MakeBufferHelper(numGroups * sizeof(int), device);
+    m_nsParticlesOut = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
 
     // upload buffer, which CPU writes to, then CopyResource to m_nsParticlesIn
     {
@@ -141,19 +142,6 @@ void ParticleSystem::CreateComputePipeline(
     }
 
     // readback buffers
-    // auto MakeReadback = [&](UINT bytes) {
-    //     CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
-    //     auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes);
-    //     ComPtr<ID3D12Resource> buf;
-    //     ThrowIfFailed(device->CreateCommittedResource(
-    //         &heap, D3D12_HEAP_FLAG_NONE, &desc,
-    //         D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&buf)));
-    //     return buf;
-    // };
-
-    // m_nsReadbackCellCount = MakeReadback(NS_NUM_CELLS * sizeof(int));
-    // m_nsReadbackCellStart = MakeReadback(NS_NUM_CELLS * sizeof(int));
-
     {
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
         auto desc = CD3DX12_RESOURCE_DESC::Buffer(NS_NUM_CELLS * sizeof(int));
@@ -170,6 +158,15 @@ void ParticleSystem::CreateComputePipeline(
             &heap, D3D12_HEAP_FLAG_NONE, &desc,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
             IID_PPV_ARGS(&m_nsReadbackCellStart)));
+    }
+
+    {
+    CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(NUM_PARTICLES * sizeof(GPUParticle));
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heap, D3D12_HEAP_FLAG_NONE, &desc,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+            IID_PPV_ARGS(&m_nsReadbackParticlesOut)));
     }
 
     // 5. command allocator + list
@@ -245,6 +242,7 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     cmdList->SetComputeRootUnorderedAccessView(3, m_nsParticlesIn->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(4, m_nsCellStart->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(5, m_nsStatusBuf->GetGPUVirtualAddress());
+    cmdList->SetComputeRootUnorderedAccessView(6, m_nsParticlesOut->GetGPUVirtualAddress());
 
     // clear pass 
     cmdList->SetPipelineState(m_psoClear.Get());
@@ -281,194 +279,14 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
         CD3DX12_RESOURCE_BARRIER::UAV(m_nsCellStart.Get());
     cmdList->ResourceBarrier(1, &scanBarrier);
 
-}
+    // reorder pass -- depends on cellStart and intraOffset both being ready
+    cmdList->SetPipelineState(m_psoReorder.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
 
-void ParticleSystem::ValidateCounting(
-    ID3D12GraphicsCommandList* cmdList,
-    ID3D12CommandQueue* cmdQueue,
-    ID3D12Fence* fence,
-    UINT64& fenceValue,
-    HANDLE fenceEvent)
-{
-    // transition cellCount to copy source
-    auto toSrc = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_nsCellCount.Get(),
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-    cmdList->ResourceBarrier(1, &toSrc);
-    cmdList->CopyResource(m_nsReadbackCellCount.Get(), m_nsCellCount.Get());
-    auto toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-        m_nsCellCount.Get(),
-        D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    cmdList->ResourceBarrier(1, &toUAV);
+    D3D12_RESOURCE_BARRIER reorderBarrier =
+        CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesOut.Get());
+    cmdList->ResourceBarrier(1, &reorderBarrier);
 
-    ThrowIfFailed(cmdList->Close());
-    ID3D12CommandList* lists[] = { cmdList };
-    cmdQueue->ExecuteCommandLists(1, lists);
-    fenceValue++;
-    ThrowIfFailed(cmdQueue->Signal(fence, fenceValue));
-    ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
-    WaitForSingleObjectEx(fenceEvent, INFINITE, FALSE);
-
-    // map and check
-    int* counts = nullptr;
-    CD3DX12_RANGE range(0, NS_NUM_CELLS * sizeof(int));
-    m_nsReadbackCellCount->Map(0, &range, reinterpret_cast<void**>(&counts));
-
-    int total = 0;
-    int nonEmpty = 0;
-    for (int i = 0; i < NS_NUM_CELLS; i++) {
-        total += counts[i];
-        if (counts[i] > 0) nonEmpty++;
-    }
-
-    char buf[128];
-    sprintf_s(buf, "[COUNT] total=%d (expected %d), nonEmptyCells=%d\n",
-        total, (int)NUM_PARTICLES, nonEmpty);
-    OutputDebugStringA(buf);
-
-    // print the first few non-empty cells
-    int printed = 0;
-    for (int i = 0; i < NS_NUM_CELLS && printed < 8; i++) {
-        if (counts[i] > 0) {
-            sprintf_s(buf, "[COUNT]   cell[%d] = %d\n", i, counts[i]);
-            OutputDebugStringA(buf);
-            printed++;
-        }
-    }
-
-    // also print the first 8 particle predicted positions from the CPU side
-    // so we can verify they're inside the grid
-    OutputDebugStringA("[COUNT] first 8 particle predictedPositions:\n");
-    for (int i = 0; i < 8; i++) {
-        sprintf_s(buf, "[COUNT]   p[%d] = (%.2f, %.2f, %.2f)\n", i,
-            m_particles[i].predictedPosition.x,
-            m_particles[i].predictedPosition.y,
-            m_particles[i].predictedPosition.z);
-        OutputDebugStringA(buf);
-    }
-
-    // also print what cell each of those maps to on the CPU
-    // using the same formula as the shader
-    XMFLOAT3 origin(-3.5f, 0.0f, -3.5f);
-    float cs = 1.0f;
-    OutputDebugStringA("[COUNT] expected cells for first 8 particles:\n");
-    for (int i = 0; i < 8; i++) {
-        XMFLOAT3 pos = m_particles[i].predictedPosition;
-        int cx = (int)floorf((pos.x - origin.x) / cs);
-        int cy = (int)floorf((pos.y - origin.y) / cs);
-        int cz = (int)floorf((pos.z - origin.z) / cs);
-        cx = max(0, min(cx, NS_GRID_DIM_X - 1));
-        cy = max(0, min(cy, NS_GRID_DIM_Y - 1));
-        cz = max(0, min(cz, NS_GRID_DIM_Z - 1));
-        int flat = cx + cy * NS_GRID_DIM_X + cz * NS_GRID_DIM_X * NS_GRID_DIM_Y;
-        sprintf_s(buf, "[COUNT]   p[%d] -> cell(%d,%d,%d) flat=%d\n", i, cx, cy, cz, flat);
-        OutputDebugStringA(buf);
-    }
-
-    m_nsReadbackCellCount->Unmap(0, nullptr);
-}
-
-void ParticleSystem::ValidatePrefixSum(
-    ID3D12GraphicsCommandList* cmdList,
-    ID3D12CommandQueue* cmdQueue,
-    ID3D12Fence* fence,
-    UINT64& fenceValue,
-    HANDLE fenceEvent)
-{
-    // copy both buffers to readback
-    D3D12_RESOURCE_BARRIER toSrc[2] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE),
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_STATE_COPY_SOURCE),
-    };
-    cmdList->ResourceBarrier(2, toSrc);
-
-    cmdList->CopyResource(m_nsReadbackCellCount.Get(), m_nsCellCount.Get());
-    cmdList->CopyResource(m_nsReadbackCellStart.Get(), m_nsCellStart.Get());
-
-    D3D12_RESOURCE_BARRIER toUAV[2] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-        CD3DX12_RESOURCE_BARRIER::Transition(
-            m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-    };
-    cmdList->ResourceBarrier(2, toUAV);
-
-    ThrowIfFailed(cmdList->Close());
-    ID3D12CommandList* lists[] = { cmdList };
-    cmdQueue->ExecuteCommandLists(1, lists);
-    fenceValue++;
-    ThrowIfFailed(cmdQueue->Signal(fence, fenceValue));
-    ThrowIfFailed(fence->SetEventOnCompletion(fenceValue, fenceEvent));
-    WaitForSingleObjectEx(fenceEvent, INFINITE, FALSE);
-
-    // map both
-    int* counts = nullptr;
-    int* starts = nullptr;
-    CD3DX12_RANGE range(0, NS_NUM_CELLS * sizeof(int));
-    m_nsReadbackCellCount->Map(0, &range, reinterpret_cast<void**>(&counts));
-    m_nsReadbackCellStart->Map(0, &range, reinterpret_cast<void**>(&starts));
-
-    char buf[128];
-
-    // test 1: cellStart[0] == 0
-    sprintf_s(buf, "[PREFIX] cellStart[0] = %d (expected 0)\n", starts[0]);
-    OutputDebugStringA(buf);
-
-    // test 2: cellStart[i] + cellCount[i] == cellStart[i+1] for every i
-    bool prefixOK = true;
-    int firstBadCell = -1;
-    for (int i = 0; i < NS_NUM_CELLS - 1; i++) {
-        if (starts[i] + counts[i] != starts[i + 1]) {
-            prefixOK = false;
-            firstBadCell = i;
-            break;
-        }
-    }
-
-    if (prefixOK) {
-        OutputDebugStringA("[PREFIX] prefix sum OK\n");
-    } else {
-        sprintf_s(buf, "[PREFIX] BROKEN at cell %d: start=%d count=%d sum=%d but next start=%d\n",
-            firstBadCell,
-            starts[firstBadCell],
-            counts[firstBadCell],
-            starts[firstBadCell] + counts[firstBadCell],
-            starts[firstBadCell + 1]);
-        OutputDebugStringA(buf);
-    }
-
-    // test 3: last cell's start + count == NUM_PARTICLES
-    int last = NS_NUM_CELLS - 1;
-    sprintf_s(buf, "[PREFIX] cellStart[last]+count = %d (expected %d)\n",
-        starts[last] + counts[last], (int)NUM_PARTICLES);
-    OutputDebugStringA(buf);
-
-    // print the non-empty cells so you can eyeball the starts
-    OutputDebugStringA("[PREFIX] non-empty cells:\n");
-    int printed = 0;
-    for (int i = 0; i < NS_NUM_CELLS && printed < 16; i++) {
-        if (counts[i] > 0) {
-            sprintf_s(buf, "[PREFIX]   cell[%d]: start=%d count=%d end=%d\n",
-                i, starts[i], counts[i], starts[i] + counts[i]);
-            OutputDebugStringA(buf);
-            printed++;
-        }
-    }
-
-    m_nsReadbackCellCount->Unmap(0, nullptr);
-    m_nsReadbackCellStart->Unmap(0, nullptr);
 }
 
 // --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------

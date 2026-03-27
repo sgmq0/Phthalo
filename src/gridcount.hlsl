@@ -30,9 +30,9 @@ cbuffer NSConstants : register(b0) {
 RWStructuredBuffer<int>        cellCount   : register(u0);
 RWStructuredBuffer<int>        intraOffset : register(u1);
 RWStructuredBuffer<GPUParticle> particlesIn : register(u2);
-
 RWStructuredBuffer<int> cellStart : register(u3);
 RWStructuredBuffer<uint> statusBuf : register(u4);
+RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 
 #define STATUS_SHIFT 30
 #define VALUE_MASK   0x3FFFFFFF
@@ -168,3 +168,17 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
         cellStart[global] = (gid.x == 0 ? 0 : gs_exclusivePrefix) + localExclusive;
     }
 }
+
+// step 3: counting kernel
+[numthreads(64, 1, 1)]
+void CSReorder(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    int cell      = CellIndex(particlesIn[i].predictedPosition);
+    int sortedIdx = cellStart[cell] + intraOffset[i];
+
+    particlesOut[sortedIdx] = particlesIn[i];
+}
+
