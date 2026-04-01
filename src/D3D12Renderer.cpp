@@ -197,7 +197,7 @@ void D3D12Renderer::LoadAssets()
 	
 	m_particleSystem.CreateComputePipeline(
         m_device.Get(),
-        GetAssetFullPath(L"gridcount.hlsl"),
+        GetAssetFullPath(L"compute.hlsl"),
         m_computeAllocator,
         m_computeCommandList);
 

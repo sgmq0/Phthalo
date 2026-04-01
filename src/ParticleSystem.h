@@ -19,7 +19,7 @@ public:
     float ComputeDensityConstraint(int i, float radius);
     XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
 
-    static const UINT NUM_PARTICLES = 50000;
+    static const UINT NUM_PARTICLES = 100000;
     std::vector<Particle> m_particles;
 
     Instancer m_instancer;
