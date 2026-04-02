@@ -3,7 +3,8 @@
 #include <iostream>
 #include <algorithm>
 
-ParticleSystem::ParticleSystem() {
+ParticleSystem::ParticleSystem() 
+{
     m_instancer = Instancer(PARTICLE_SIZE);
 }
 
@@ -32,7 +33,8 @@ void ParticleSystem::LoadParticles()
     m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
-ComPtr<ID3DBlob> CompileHelper(std::wstring shaderPath, const char* entry) {
+ComPtr<ID3DBlob> CompileHelper(std::wstring shaderPath, const char* entry) 
+{
     ComPtr<ID3DBlob> computeShader, computeError;
     HRESULT hr = D3DCompileFromFile(shaderPath.c_str(),
         nullptr, nullptr, entry, "cs_5_0", 0, 0, &computeShader, &computeError);
@@ -41,7 +43,8 @@ ComPtr<ID3DBlob> CompileHelper(std::wstring shaderPath, const char* entry) {
     return computeShader;
 };
 
-ComPtr<ID3D12PipelineState> MakePSOHelper(ComPtr<ID3DBlob> computeShader, ComPtr<ID3D12RootSignature> rootSignature, ID3D12Device* device) {
+ComPtr<ID3D12PipelineState> MakePSOHelper(ComPtr<ID3DBlob> computeShader, ComPtr<ID3D12RootSignature> rootSignature, ID3D12Device* device) 
+{
     D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
     psoDesc.pRootSignature = rootSignature.Get();
     psoDesc.CS = CD3DX12_SHADER_BYTECODE(computeShader.Get());
@@ -51,7 +54,8 @@ ComPtr<ID3D12PipelineState> MakePSOHelper(ComPtr<ID3DBlob> computeShader, ComPtr
     return pso;
 };
 
-ComPtr<ID3D12Resource> MakeBufferHelper(UINT byteSize, ID3D12Device* device) {
+ComPtr<ID3D12Resource> MakeBufferHelper(UINT byteSize, ID3D12Device* device) 
+{
     auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(byteSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
 
@@ -173,10 +177,12 @@ void ParticleSystem::CreateComputePipeline(
 void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, float dt)
 {
     DispatchInit(cmdList, dt);
-    DispatchPrediction(cmdList, dt);
-    DispatchNeighborSearch(cmdList);
+    DispatchPrediction(cmdList, dt); // step 1: predict position
+    DispatchNeighborSearch(cmdList); // step 2: perform neighbor search
 
     for (int i = 0; i < ITERATIONS; i++) {
+        
+        // step 3: 
         // compute lambda_i
         cmdList->SetPipelineState(m_psoComputeLambda.Get());
         cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
@@ -249,8 +255,8 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
     cmdList->SetComputeRootUnorderedAccessView(6, m_nsParticlesOut->GetGPUVirtualAddress());
 }
 
-void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, float dt) {
-
+void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, float dt) 
+{
     // upload particle positions to the gpu
     std::vector<GPUParticle> gpu(NUM_PARTICLES);
     for (int i = 0; i < NUM_PARTICLES; i++) {
@@ -342,7 +348,8 @@ ComPtr<ID3D12PipelineState> ParticleSystem::GetPsoClear()
     return m_psoClear;
 }
 
-void ParticleSystem::CopyBackResources(ID3D12GraphicsCommandList* cmdList) {
+void ParticleSystem::CopyBackResources(ID3D12GraphicsCommandList* cmdList) 
+{
     D3D12_RESOURCE_BARRIER toSrc = CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
 
@@ -376,7 +383,8 @@ void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
 
 // --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
 
-void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
+void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) 
+{
     if (dt <= 0.0f) return;  // skip PBD on frame 1
 
 	// update positions and velocity
@@ -384,10 +392,10 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
         XMFLOAT3& pred = m_particles[i].predictedPosition;
         XMFLOAT3& pos  = m_particles[i].position;
 
-        // // clamp predicted position to box
-        // pred.x = std::clamp(pred.x, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
-        // pred.y = std::clamp(pred.y, 0.0f, BBOX_SIZE_Y);
-        // pred.z = std::clamp(pred.z, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
+        // clamp predicted position to box
+        pred.x = std::clamp(pred.x, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
+        pred.y = std::clamp(pred.y, 0.0f, BBOX_SIZE_Y);
+        pred.z = std::clamp(pred.z, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
 
         // derive velocity from the displacement (this is PBD -- velocity comes last)
         m_particles[i].velocity.x = DAMPING * (pred.x - pos.x) / dt;
@@ -414,7 +422,8 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
 	UpdateInstances();
 }
 
-void ParticleSystem::UpdateInstances() {
+void ParticleSystem::UpdateInstances() 
+{
     // push to instances vector
 	for (int i = 0; i < NUM_PARTICLES; i++) {
         XMMATRIX mat = XMMatrixTranslation(

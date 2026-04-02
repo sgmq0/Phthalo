@@ -10,10 +10,11 @@ Camera::Camera(XMFLOAT3 position, XMFLOAT3 up, float yaw, float pitch) :
     updateCameraVectors();
 }
 
-void Camera::Update(float dt) {
-    XMVECTOR pos     = XMLoadFloat3(&m_position);
-    XMVECTOR front   = XMLoadFloat3(&m_front);
-    XMVECTOR right   = XMLoadFloat3(&m_right);
+void Camera::Update(float dt) 
+{
+    XMVECTOR pos = XMLoadFloat3(&m_position);
+    XMVECTOR front = XMLoadFloat3(&m_front);
+    XMVECTOR right = XMLoadFloat3(&m_right);
 
     if (m_keys['W']) pos = XMVectorAdd(pos, XMVectorScale(front,  m_movementSpeed * dt));
     if (m_keys['S']) pos = XMVectorAdd(pos, XMVectorScale(front, -m_movementSpeed * dt));
@@ -27,15 +28,18 @@ void Camera::Update(float dt) {
     XMStoreFloat3(&m_position, pos);
 }
 
-void Camera::OnKeyDown(UINT8 key) {
+void Camera::OnKeyDown(UINT8 key) 
+{
     m_keys[key] = true;
 }
 
-void Camera::OnKeyUp(UINT8 key) {
+void Camera::OnKeyUp(UINT8 key) 
+{
     m_keys[key] = false;
 }
 
-void Camera::OnMouseMove(int dx, int dy) {
+void Camera::OnMouseMove(int dx, int dy) 
+{
     m_yaw += dx * m_mouseSensitivity;
     m_pitch += dy * m_mouseSensitivity;
 
@@ -50,14 +54,16 @@ void Camera::OnMouseMove(int dx, int dy) {
     updateCameraVectors();
 }
 
-XMMATRIX Camera::GetViewMatrix() const {
-    XMVECTOR pos   = XMLoadFloat3(&m_position);
+XMMATRIX Camera::GetViewMatrix() const 
+{
+    XMVECTOR pos = XMLoadFloat3(&m_position);
     XMVECTOR front = XMLoadFloat3(&m_front);
-    XMVECTOR up    = XMLoadFloat3(&m_up);
+    XMVECTOR up = XMLoadFloat3(&m_up);
     return XMMatrixLookAtLH(pos, XMVectorAdd(pos, front), up);
 }
 
-XMMATRIX Camera::GetProjectionMatrix(float aspectRatio) const {
+XMMATRIX Camera::GetProjectionMatrix(float aspectRatio) const 
+{
     return XMMatrixPerspectiveFovLH(
         XMConvertToRadians(m_zoom),
         aspectRatio,
@@ -66,7 +72,8 @@ XMMATRIX Camera::GetProjectionMatrix(float aspectRatio) const {
     );
 }
 
-void Camera::updateCameraVectors() {
+void Camera::updateCameraVectors() 
+{
     XMFLOAT3 front;
     front.x = cos(XMConvertToRadians(m_yaw)) * cos(XMConvertToRadians(m_pitch));
     front.y = sin(XMConvertToRadians(m_pitch));

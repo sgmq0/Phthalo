@@ -223,7 +223,8 @@ void D3D12Renderer::LoadAssets()
 	WaitForGPU();
 }
 
-void D3D12Renderer::CreateGraphicsPipeline() {
+void D3D12Renderer::CreateGraphicsPipeline() 
+{
 	// create one root descriptor visible to vertex shader at b0
 	CD3DX12_ROOT_PARAMETER rootParam;
 	rootParam.InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_VERTEX);
@@ -344,7 +345,8 @@ void D3D12Renderer::CreateGraphicsPipeline() {
 	ThrowIfFailed(m_commandList->Close());
 }
 
-void D3D12Renderer::CreateBuffers() {
+void D3D12Renderer::CreateBuffers() 
+{
 	// ---------- create the vertex buffer ----------
 	{
 		const UINT vertexBufferSize = m_particleSystem.m_instancer.m_sphere.sphereVertices.size() * sizeof(SphereMesh::Vertex);

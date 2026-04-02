@@ -34,49 +34,49 @@ RWStructuredBuffer<int> cellStart : register(u3);
 RWStructuredBuffer<uint> statusBuf : register(u4); // buffer for prefix sum algo    
 RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 
+// values for uniform grid search
 #define STATUS_SHIFT 30
 #define VALUE_MASK   0x3FFFFFFF
 #define TILE 256
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
 
-// static const float RHO_0   = 10.0f; // rest density
-// static const float EPSILON  = 100.0f;
-
 float Poly6(float3 r, float h)
 {
-    float r2 = dot(r, r);
+    const float coeff = 315.0 / (64.0 * 3.14159265f);
+
     float h2 = h * h;
-    if (r2 > h2) return 0.0f;
+    float r2 = dot(r, r);
+
+    if (r2 > h2) {
+        return 0.0;
+    }
+
+    float h9 = pow(h, 9);
     float diff = h2 - r2;
-    return (315.0f / (64.0f * 3.14159265f)) / pow(h, 9) * diff * diff * diff;
+    float diff3 = diff * diff * diff;
+
+    return (coeff / h9) * diff3;
 }
 
 float3 SpikyGradient(float3 r, float h)
 {
-    float rLen = length(r);
-    if (rLen > h || rLen < 1e-12f) return float3(0, 0, 0);
-    float diff = h - rLen;
-    float scalar = -(45.0f / (3.14159265f * pow(h, 6))) * diff * diff / rLen;
+    float coeff = 45.0f / 3.14159265f;
+    float norm = length(r);
+
+    if (norm > h || norm < 1e-12f) return float3(0, 0, 0);
+
+    float h6 = pow(h, 6);
+    float diff = h - norm;
+    float diff2 = diff * diff;
+
+    float scalar = -(45.0f / (3.14159265f * h6)) * diff2 / norm;
     return r * scalar;
 }
 
-[numthreads(64, 1, 1)]
-void CSPrediction(uint3 tid : SV_DispatchThreadID)
-{
-    int i = (int)tid.x;
-    if (i >= numParticles) return;
+// ----------------- UNIFORM GRID SEARCH KERNELS --------------------
 
-    // apply gravity
-    particlesIn[i].velocity.y += -9.8f * dt;
-
-    // predict position
-    particlesIn[i].predictedPosition = particlesIn[i].position
-        + dt * particlesIn[i].velocity;
-}
-
-// step 1 - counting kernel
-
+// helper functions here
 int CellIndex(float3 pos) {
     int3 cell = (int3)floor((pos - gridOrigin) / cellSize);
     cell = clamp(cell, int3(0,0,0), gridDim - int3(1,1,1));
@@ -92,6 +92,15 @@ void CSClearCells(uint3 tid : SV_DispatchThreadID) {
 }
 
 [numthreads(64, 1, 1)]
+void CSClearStatus(uint3 tid : SV_DispatchThreadID) {
+    uint numGroups = ((uint)numCells + 255) / 256;
+    if ((int)tid.x < numGroups)
+        statusBuf[tid.x] = 0u;
+}
+
+// step 1 - counting kernel
+// determines the indexing offset within a cell. (intra-cell offset)
+[numthreads(64, 1, 1)]
 void CSCounting(uint3 tid : SV_DispatchThreadID) {
     if ((int)tid.x >= numParticles) return;
     int cell = CellIndex(particlesIn[tid.x].predictedPosition);
@@ -100,18 +109,10 @@ void CSCounting(uint3 tid : SV_DispatchThreadID) {
     intraOffset[tid.x] = slot;
 }
 
-[numthreads(1, 1, 1)]
-void CSBindingTest(uint3 tid : SV_DispatchThreadID) {
-    cellCount[0] = 42;
-}
-
-[numthreads(64, 1, 1)]
-void CSClearStatus(uint3 tid : SV_DispatchThreadID) {
-    uint numGroups = ((uint)numCells + 255) / 256;
-    if ((int)tid.x < numGroups)
-        statusBuf[tid.x] = 0u;
-}
-
+// step 2 - performs prefix sum operation. 
+// this is the indexing offset between different cells. (inter-cell offset)
+// loads into cellStart
+// based on [MG16] - 2016 paper by Merrill and Garland
 [numthreads(TILE, 1, 1)]
 void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
 {
@@ -120,7 +121,7 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
     0: not started yet
     1: local aggregate ready (partial)
     2: inclusive prefix ready (final)
-    [MG16] - 2016 paper by Merrill and Garland
+    ngl i don't fully understand this
     */
 
     uint global = gid.x * TILE + tid.x;
@@ -197,7 +198,8 @@ void CSPrefixSum(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
     }
 }
 
-// step 3: counting kernel
+// step 3: reordering kernel
+// simple sort on the particle data.
 [numthreads(64, 1, 1)]
 void CSReorder(uint3 tid : SV_DispatchThreadID)
 {
@@ -211,15 +213,32 @@ void CSReorder(uint3 tid : SV_DispatchThreadID)
     particlesOut[sortedIdx] = particlesIn[i];
 }
 
+// ----------------- PBF SIMULATION KERNELS --------------------
+
+// step 1: predict positions
+[numthreads(64, 1, 1)]
+void CSPrediction(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int) tid.x;
+    if (i >= numParticles) return;
+
+    // apply forces
+    particlesIn[i].velocity.y += -9.8f * dt;
+
+    // predict position
+    particlesIn[i].predictedPosition = particlesIn[i].position + dt * particlesIn[i].velocity;
+}
+
+// step 2 is neighbor search, dispatched from ParticleSystem::DispatchGPUCommands
+
+// step 3: find lambda_i
 [numthreads(64, 1, 1)]
 void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
 {
     int i = (int)tid.x;
     if (i >= numParticles) return;
 
-    //particlesIn[i].lambda = 999.0f;
-
-    // particlesOut is sorted by cell — each thread handles one sorted slot
+    // go in order of position/cell (sorted in particlesOut) instead of unsorted (particlesIn)
     GPUParticle pi = particlesOut[i];
     float3 pos_i = pi.predictedPosition;
 
@@ -230,11 +249,11 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
         gridDim - int3(1,1,1)
     );
 
-    float density    = 0.0f;
+    float density = 0.0f;
     float3 gradSum_i = float3(0, 0, 0);  // sum of gradients w.r.t. i (self term)
     float denominator = 0.0f;
-    float test = 5.0f;
 
+    // iterates through neighbors
     for (int dx = -1; dx <= 1; dx++)
     for (int dy = -1; dy <= 1; dy++)
     for (int dz = -1; dz <= 1; dz++)
@@ -260,8 +279,6 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
 
             // accumulate self-term gradient (k == i means sum over all j)
             gradSum_i += SpikyGradient(r, H);
-
-            test += 1.0f;
         }
     }
 
@@ -274,7 +291,6 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
 
     // write to originalIndex so CPU-side m_particles[originalIndex] stays in sync
     particlesIn[pi.originalIndex].lambda = -constraint / denominator;
-    //particlesIn[i].lambda = test;
 }
 
 [numthreads(64, 1, 1)]

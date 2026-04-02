@@ -30,7 +30,7 @@ public:
     void DispatchPrediction(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
 
-    // getters for private variables
+    // various getters for private variables
     ComPtr<ID3D12PipelineState> GetPsoClear();
 
     // instancing member variables
