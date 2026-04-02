@@ -9,22 +9,8 @@ using namespace DirectX;
 class ParticleSystem {
 public:
     ParticleSystem();
-    ParticleSystem(UINT numParticles);
 
     void LoadParticles();
-    void ReadbackParticleData(ID3D12GraphicsCommandList* cmdList);
-    void UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList);
-    void UpdateInstances();
-
-    float ComputeDensityConstraint(int i, float radius);
-    XMFLOAT3 ComputeGradiantConstraint(int i, int j, float density, float radius);
-
-    static const UINT NUM_PARTICLES = 100000;
-    std::vector<Particle> m_particles;
-
-    Instancer m_instancer;
-
-    // ----- the actual compute pipeline -----
     void CreateComputePipeline(
         ID3D12Device* device,
         std::wstring shaderPath,
@@ -32,19 +18,51 @@ public:
         ComPtr<ID3D12GraphicsCommandList>& commandList
     );
 
+    // update calls
+    void ReadbackParticleData(ID3D12GraphicsCommandList* cmdList);  // load back the particles to CPU
+    void CopyBackResources(ID3D12GraphicsCommandList* cmdList);
+    void UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList);
+    void UpdateInstances();
+
+    // compute dispatches
     void DispatchGPUCommands(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchInit(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchPrediction(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
 
-    void CopyBackResources(ID3D12GraphicsCommandList* cmdList);
+    // getters for private variables
+    ComPtr<ID3D12PipelineState> GetPsoClear();
 
-    static constexpr int NS_GRID_DIM_X = 20;  // (-3 to +3) / cellSize = 0.35 -> 18, round up
-    static constexpr int NS_GRID_DIM_Y = 26;  // 0 to 9 / 0.35 -> 26
-    static constexpr int NS_GRID_DIM_Z = 20;
-    static constexpr int NS_NUM_CELLS  = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
+    // instancing member variables
+    std::vector<Particle> m_particles;
+    Instancer m_instancer;
+
+    // --------- CONSTANTS --------
+    static const UINT NUM_PARTICLES = 50000;
+    const float PARTICLE_SIZE = 0.1f;
+    const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
+
+    // simulation consts
+    const float BBOX_SIZE_XZ = 10.0f;
+    const float BBOX_SIZE_Y = 100.0f;
+    const float SMOOTHING = 1.0f;
+    const float RHO_0 = 10.0f;          // rest density
+    const float EPSILON = 100.0f;
+
+    // consts we use in finalization step
+    const float DAMPING = 0.999f;
+    const float VISCOSITY = 0.1f;
+    const int ITERATIONS = 1;
+
+    // uniform grid search consts
+    const UINT NS_GRID_DIM_X = UINT(BBOX_SIZE_XZ * 2 / SMOOTHING);
+    const UINT NS_GRID_DIM_Y = UINT(BBOX_SIZE_Y / SMOOTHING);
+    const UINT NS_GRID_DIM_Z = UINT(BBOX_SIZE_XZ * 2 / SMOOTHING);
+    const UINT NS_NUM_CELLS = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
     
     bool m_nsFirstFrame = true;
+
+private:
 
     ComPtr<ID3D12RootSignature> m_computeRootSignature;
     ComPtr<ID3D12Resource> m_nsUploadBuffer;    // CPU -> GPU staging
@@ -80,17 +98,13 @@ public:
     ComPtr<ID3D12PipelineState> m_psoComputeXSPH;
 
     // kernel that performs all the final operations
+    // TODO: make this work lol
     ComPtr<ID3D12PipelineState> m_psoComputeFinalize;
 
     // readback
-    ComPtr<ID3D12Resource> m_nsReadbackCellCount;
-    ComPtr<ID3D12Resource> m_nsReadbackCellStart;
-    ComPtr<ID3D12Resource> m_nsReadbackParticlesOut;
     ComPtr<ID3D12Resource> m_nsReadbackParticlesIn;
 
     // testing
     ComPtr<ID3D12Resource> m_computeReadbackBuffer;
-
-private:
     
 };

@@ -13,7 +13,7 @@ D3D12Renderer::D3D12Renderer(UINT width, UINT height) :
 	m_fenceValues{},
 	m_rtvDescriptorSize(0),
 	m_camera(XMFLOAT3(-30.0f, 10.0f, 0.0f), XMFLOAT3(0.0f, 1.0f, 0.0f), 0.0f, 0.0f),
-	m_particleSystem(ParticleSystem(500))
+	m_particleSystem(ParticleSystem())
 {
 }
 
@@ -47,7 +47,7 @@ void D3D12Renderer::OnUpdate()
 
 	ThrowIfFailed(m_computeAllocator->Reset());
 	ThrowIfFailed(m_computeCommandList->Reset(
-		m_computeAllocator.Get(), m_particleSystem.m_psoClear.Get()));
+		m_computeAllocator.Get(), m_particleSystem.GetPsoClear().Get()));
 
 	// dispatch gpu commands
 	m_particleSystem.DispatchGPUCommands(m_computeCommandList.Get(), dt);
@@ -195,6 +195,7 @@ void D3D12Renderer::LoadAssets()
 {
 	CreateGraphicsPipeline();
 	
+	// function in m_particleSystem to setup the compute pipeline
 	m_particleSystem.CreateComputePipeline(
         m_device.Get(),
         GetAssetFullPath(L"compute.hlsl"),

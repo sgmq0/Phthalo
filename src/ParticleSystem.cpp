@@ -3,14 +3,8 @@
 #include <iostream>
 #include <algorithm>
 
-ParticleSystem::ParticleSystem() :
-    m_instancer(Instancer())
-{
-}
-
-ParticleSystem::ParticleSystem(UINT numParticles) :
-    m_instancer(Instancer())
-{  
+ParticleSystem::ParticleSystem() {
+    m_instancer = Instancer(PARTICLE_SIZE);
 }
 
 void ParticleSystem::LoadParticles()
@@ -18,17 +12,17 @@ void ParticleSystem::LoadParticles()
     m_particles.resize(NUM_PARTICLES);
 
 	// initializes all the particles
-	float spacing = 0.3f;
     int perAxis = (int)cbrt(NUM_PARTICLES);
     int i = 0;
     for (int x = 0; x < perAxis; x++)
     for (int y = 0; y < perAxis; y++)
     for (int z = 0; z < perAxis; z++) {
         if (i >= NUM_PARTICLES) break;
+
         m_particles[i].position = {
-            (x - perAxis/2.0f) * spacing,
-            y * spacing + 1.0f,   // start above floor
-            (z - perAxis/2.0f) * spacing
+            (x - perAxis/2.0f) * PARTICLE_SPACING,
+            y * PARTICLE_SPACING + 1.0f,   // start above floor
+            (z - perAxis/2.0f) * PARTICLE_SPACING
         };
         m_particles[i].velocity = {0, 0, 0};
         m_particles[i].predictedPosition = m_particles[i].position; 
@@ -156,33 +150,6 @@ void ParticleSystem::CreateComputePipeline(
     // readback buffers
     {
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
-        auto desc = CD3DX12_RESOURCE_DESC::Buffer(NS_NUM_CELLS * sizeof(int));
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heap, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-            IID_PPV_ARGS(&m_nsReadbackCellCount)));
-    }
-
-    {
-        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
-        auto desc = CD3DX12_RESOURCE_DESC::Buffer(NS_NUM_CELLS * sizeof(int));
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heap, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-            IID_PPV_ARGS(&m_nsReadbackCellStart)));
-    }
-
-    {
-    CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
-        auto desc = CD3DX12_RESOURCE_DESC::Buffer(NUM_PARTICLES * sizeof(GPUParticle));
-        ThrowIfFailed(device->CreateCommittedResource(
-            &heap, D3D12_HEAP_FLAG_NONE, &desc,
-            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-            IID_PPV_ARGS(&m_nsReadbackParticlesOut)));
-    }
-
-    {
-        CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
         auto desc = CD3DX12_RESOURCE_DESC::Buffer(NUM_PARTICLES * sizeof(GPUParticle));
         ThrowIfFailed(device->CreateCommittedResource(
             &heap, D3D12_HEAP_FLAG_NONE, &desc,
@@ -209,24 +176,26 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     DispatchPrediction(cmdList, dt);
     DispatchNeighborSearch(cmdList);
 
-    // compute lambda_i
-    cmdList->SetPipelineState(m_psoComputeLambda.Get());
-    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    auto lambdaBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-    cmdList->ResourceBarrier(1, &lambdaBarrier);
+    for (int i = 0; i < ITERATIONS; i++) {
+        // compute lambda_i
+        cmdList->SetPipelineState(m_psoComputeLambda.Get());
+        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+        auto lambdaBarrier = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+        cmdList->ResourceBarrier(1, &lambdaBarrier);
 
-    // compute delta rho
-    // step 5: compute and apply delta
-    cmdList->SetPipelineState(m_psoComputeDelta.Get());
-    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-    cmdList->ResourceBarrier(1, &b2);
+        // compute delta rho
+        // step 5: compute and apply delta
+        cmdList->SetPipelineState(m_psoComputeDelta.Get());
+        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+        auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+        cmdList->ResourceBarrier(1, &b2);
 
-    // compute xsph
-    cmdList->SetPipelineState(m_psoComputeXSPH.Get());
-    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-    cmdList->ResourceBarrier(1, &b3);
+        // compute xsph
+        cmdList->SetPipelineState(m_psoComputeXSPH.Get());
+        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+        auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+        cmdList->ResourceBarrier(1, &b3);
+    }
 
     // finalize
     // cmdList->SetPipelineState(m_psoComputeFinalize.Get());
@@ -240,22 +209,29 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
 
     // upload constants
     struct NSConstants {
-        XMFLOAT3 gridOrigin; float cellSize;
+        XMFLOAT3 gridOrigin; 
+        float cellSize;
         int gridDimX, gridDimY, gridDimZ;
         int numParticles;
         int numCells;
         float dt;
-        int _pad[2];
+        float H;
+        float rho_0;        // rest density
+        float epsilon;
+        int _pad[3];
     };
     NSConstants cb;
-    cb.gridOrigin = XMFLOAT3(-3.5f, 0.0f, -3.5f);
-    cb.cellSize = 1.0f;  // smoothing radius
+    cb.gridOrigin = XMFLOAT3(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ);
+    cb.cellSize = SMOOTHING;  // smoothing radius, H
     cb.gridDimX = NS_GRID_DIM_X;
     cb.gridDimY = NS_GRID_DIM_Y;
     cb.gridDimZ = NS_GRID_DIM_Z;
     cb.numParticles = (int)NUM_PARTICLES;
     cb.numCells = NS_NUM_CELLS;
     cb.dt = dt;
+    cb.H = SMOOTHING;
+    cb.rho_0 = RHO_0;
+    cb.epsilon = EPSILON;
 
     void* mapped = nullptr;
     m_nsConstantBuffer->Map(0, nullptr, &mapped);
@@ -361,122 +337,23 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     cmdList->ResourceBarrier(1, &reorderBarrier);
 }
 
-// --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
-
-XMFLOAT3 SubtractFloat3(XMFLOAT3 v1, XMFLOAT3 v2) {
-    return XMFLOAT3(v1.x - v2.x, v1.y - v2.y, v1.z - v2.z);
-}
-
-float SquaredNorm(XMFLOAT3 vec) {
-    float squared = vec.x * vec.x + vec.y * vec.y + vec.z * vec.z;
-    return squared;
-}
-
-float Poly6(XMFLOAT3 r, float h) {
-    const float coeff = 315.0 / (64.0 * XM_PI);
-
-    float h2 = h * h;
-    float r2 = SquaredNorm(r);
-
-    if (r2 > h2) {
-        return 0.0;
-    }
-
-    float h9 = pow(h, 9);
-    float diff = h2 - r2;
-    float diff3 = diff * diff * diff;
-
-    return (coeff / h9) * diff3;
-}
-
-
-XMFLOAT3 SpikyGradient(XMFLOAT3 r, float h) {
-    float coeff = 45.0f / XM_PI;
-
-    float norm = sqrt(r.x*r.x + r.y*r.y + r.z*r.z);
-
-    if (norm > h) {
-        return XMFLOAT3(0.0, 0.0, 0.0);
-    }
-
-    float h6 = pow(h, 6);
-    float diff = h - norm;
-    float diff2 = diff * diff;
-
-    float times = (coeff / (h6 * max(norm, 1e-24f))) * diff2;
-    XMFLOAT3 result = XMFLOAT3(-r.x * times, -r.y * times, -r.z * times);
-    return result;
-}
-
-float ParticleSystem::ComputeDensityConstraint(int i, float radius) {
-    Particle p_target = m_particles[i];
-
-    float density = 0.0;
-    for (int j : p_target.neighbors) {
-        Particle p = m_particles[j];
-
-        XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
-        density += Poly6(pos, radius);
-    }
-
-    return density;
-}
-
-XMFLOAT3 ParticleSystem::ComputeGradiantConstraint(int i, int j, float density, float radius) {
-    Particle p_target = m_particles[i];
-
-    if (i == j) {
-        XMFLOAT3 sum = XMFLOAT3(0.0, 0.0, 0.0);
-        for (int neighbor : m_particles[i].neighbors) {
-            Particle p = m_particles[neighbor];
-
-            XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
-            XMFLOAT3 grad = SpikyGradient(pos, radius);
-            sum.x += grad.x;
-            sum.y += grad.y;
-            sum.z += grad.z;
-        }
-
-        XMFLOAT3 result = XMFLOAT3(sum.x / density, sum.y / density, sum.z / density);
-        return result;
-    } else {
-        Particle p = m_particles[j];
-
-        XMFLOAT3 pos = SubtractFloat3(p_target.predictedPosition, p.predictedPosition);
-        XMFLOAT3 grad = SpikyGradient(pos, radius);
-        return XMFLOAT3(-grad.x, -grad.y, -grad.z);
-    }
+ComPtr<ID3D12PipelineState> ParticleSystem::GetPsoClear()
+{
+    return m_psoClear;
 }
 
 void ParticleSystem::CopyBackResources(ID3D12GraphicsCommandList* cmdList) {
-    D3D12_RESOURCE_BARRIER toSrc[4] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesOut.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE),
-    };
-    cmdList->ResourceBarrier(4, toSrc);
+    D3D12_RESOURCE_BARRIER toSrc = CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE);
 
-    cmdList->CopyResource(m_nsReadbackParticlesOut.Get(), m_nsParticlesOut.Get());
-    cmdList->CopyResource(m_nsReadbackCellCount.Get(),    m_nsCellCount.Get());
-    cmdList->CopyResource(m_nsReadbackCellStart.Get(),    m_nsCellStart.Get());
+    cmdList->ResourceBarrier(1, &toSrc);
+
     cmdList->CopyResource(m_nsReadbackParticlesIn.Get(),  m_nsParticlesIn.Get());
 
-    D3D12_RESOURCE_BARRIER toUAV[4] = {
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesOut.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellCount.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsCellStart.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-        CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
-            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
-    };
-    cmdList->ResourceBarrier(4, toUAV);
+    D3D12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(m_nsParticlesIn.Get(),
+            D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    cmdList->ResourceBarrier(1, &toUAV);
 }
 
 void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
@@ -497,49 +374,39 @@ void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
     m_nsReadbackParticlesIn->Unmap(0, &writeRange);
 }
 
+// --------- ALL THE ACTUAL MATH STUFF GOES DOWN HERE -----------
+
 void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList) {
-
     if (dt <= 0.0f) return;  // skip PBD on frame 1
-
-    // put this into the constant buffer later....
-	const float radius = 1.0f;
-    const float radius2 = radius * radius;
-    const float rho_0 = 10.0f;       // rest density
-    const float epsilon = 100.0f;
-    const float damping = 0.999f;
-    const float boxSize = 10.0f;
-    const float restitution = 0.3f;
-    const float viscosity = 0.05f;
-    const int iterations = 3;
 
 	// update positions and velocity
 	for (int i = 0; i < NUM_PARTICLES; i++) {
         XMFLOAT3& pred = m_particles[i].predictedPosition;
         XMFLOAT3& pos  = m_particles[i].position;
 
-        // clamp predicted position to box
-        pred.x = std::clamp(pred.x, -boxSize, boxSize);
-        pred.y = std::clamp(pred.y,     0.0f,   100.0f);
-        pred.z = std::clamp(pred.z, -boxSize, boxSize);
+        // // clamp predicted position to box
+        // pred.x = std::clamp(pred.x, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
+        // pred.y = std::clamp(pred.y, 0.0f, BBOX_SIZE_Y);
+        // pred.z = std::clamp(pred.z, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
 
         // derive velocity from the displacement (this is PBD -- velocity comes last)
-        m_particles[i].velocity.x = damping * (pred.x - pos.x) / dt;
-        m_particles[i].velocity.y = damping * (pred.y - pos.y) / dt;
-        m_particles[i].velocity.z = damping * (pred.z - pos.z) / dt;
+        m_particles[i].velocity.x = DAMPING * (pred.x - pos.x) / dt;
+        m_particles[i].velocity.y = DAMPING * (pred.y - pos.y) / dt;
+        m_particles[i].velocity.z = DAMPING * (pred.z - pos.z) / dt;
 
-        // kill the component pointing INTO the wall, after velocity is computed
-        if (pred.x <= -boxSize && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
-        if (pred.x >=  boxSize && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
-        if (pred.y <=    0.0f  && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
-        if (pred.z <= -boxSize && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
-        if (pred.z >=  boxSize && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
+        // kill the component pointing into the wall, after velocity is computed
+        if (pred.x <= -BBOX_SIZE_XZ && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
+        if (pred.x >= BBOX_SIZE_XZ && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
+        if (pred.y <= 0.0f && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
+        if (pred.z <= -BBOX_SIZE_XZ && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
+        if (pred.z >= BBOX_SIZE_XZ && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
 
         // todo: vorticity
 
         // apply XSPH (fix: use per-axis components)
-        m_particles[i].velocity.x += m_particles[i].xsph.x * viscosity;
-        m_particles[i].velocity.y += m_particles[i].xsph.y * viscosity;
-        m_particles[i].velocity.z += m_particles[i].xsph.z * viscosity;
+        m_particles[i].velocity.x += m_particles[i].xsph.x * VISCOSITY;
+        m_particles[i].velocity.y += m_particles[i].xsph.y * VISCOSITY;
+        m_particles[i].velocity.z += m_particles[i].xsph.z * VISCOSITY;
 
         pos = pred;
     }

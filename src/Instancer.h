@@ -9,6 +9,7 @@ using Microsoft::WRL::ComPtr;
 class Instancer {
 public:
     Instancer();
+    Instancer(float radius);
 
     SphereMesh m_sphere;
     size_t m_sphereIndexCount;

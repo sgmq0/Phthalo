@@ -5,7 +5,11 @@ using namespace DirectX;
 
 class SphereMesh {
 public:
-    SphereMesh(float rad) { m_radius = rad; }
+    SphereMesh(float rad, int res) { 
+        m_radius = rad; 
+        m_stacks = res;
+        m_slices = res;
+    }
 
     // vertex struct, self-explanatory.
     struct Vertex
@@ -16,8 +20,8 @@ public:
 	};
 
     float m_radius = 1.0f;
-    int m_stacks = 16;
-    int m_slices = 16;
+    int m_stacks = 10;
+    int m_slices = 10;
 
     // populates the vertex and index arrays
     void LoadMesh() {
@@ -65,5 +69,4 @@ public:
 
     std::vector<Vertex> sphereVertices;
     std::vector<UINT32> sphereIndices;
-
 };

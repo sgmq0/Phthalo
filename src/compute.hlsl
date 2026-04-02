@@ -1,11 +1,4 @@
 
-// RWStructuredBuffer<float4> output : register(u0);
-
-// [numthreads(64, 1, 1)]
-// void CSGridCount(uint3 DTid : SV_DispatchThreadID)
-// {
-//     output[DTid.x] = float4(DTid.x, 0, 0, 1);
-// }
 
 struct GPUParticle {
     float3 position;
@@ -22,20 +15,23 @@ struct GPUParticle {
 };
 
 cbuffer NSConstants : register(b0) {
-    float3 gridOrigin;
-    float  cellSize;
-    int3   gridDim;
-    int    numParticles;
-    int    numCells;
-    float  dt;
-    int2   _pad;
+    float3 gridOrigin;  // bottom right of the bounding box
+    float cellSize;     // size of each of the boxes, this is the same as H
+    int3 gridDim;       // how many cells in each dimension
+    int numParticles;   // number of particles in total
+    int numCells;       // number of cells overall
+    float dt;           // just the timestep
+    float H;            // smoothing
+    float RHO_0;        // rest density
+    float EPSILON;
+    int3 _pad;
 };
 
-RWStructuredBuffer<int> cellCount            : register(u0);
-RWStructuredBuffer<int> intraOffset          : register(u1);
-RWStructuredBuffer<GPUParticle> particlesIn  : register(u2);
-RWStructuredBuffer<int> cellStart            : register(u3);
-RWStructuredBuffer<uint> statusBuf           : register(u4);
+RWStructuredBuffer<int> cellCount : register(u0);
+RWStructuredBuffer<int> intraOffset : register(u1);
+RWStructuredBuffer<GPUParticle> particlesIn : register(u2);
+RWStructuredBuffer<int> cellStart : register(u3);
+RWStructuredBuffer<uint> statusBuf : register(u4); // buffer for prefix sum algo    
 RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 
 #define STATUS_SHIFT 30
@@ -44,19 +40,8 @@ RWStructuredBuffer<GPUParticle> particlesOut : register(u5);
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
 
-static const float H       = 1.0f;
-static const float RHO_0   = 10.0f;
-static const float EPSILON  = 100.0f;
-
-static const float radius      = 1.0f;
-static const float radius2     = radius * radius;
-static const float rho_0       = 10.0f;
-static const float epsilon     = 100.0f;
-static const float damping     = 0.999f;
-static const float boxSizeXZ   = 10.0f;
-static const float boxSizeY    = 100.0f;
-static const float restitution = 0.3f;
-static const float viscosity   = 0.05f;
+// static const float RHO_0   = 10.0f; // rest density
+// static const float EPSILON  = 100.0f;
 
 float Poly6(float3 r, float h)
 {
@@ -429,33 +414,33 @@ void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)
 [numthreads(64, 1, 1)]
 void CSFinalize(uint3 tid : SV_DispatchThreadID)
 {
-    int i = (int)tid.x;
-    if (i >= numParticles) return;
+    // int i = (int)tid.x;
+    // if (i >= numParticles) return;
 
-    float3 pred = particlesIn[i].predictedPosition;
-    float3 pos = particlesIn[i].position;
+    // float3 pred = particlesIn[i].predictedPosition;
+    // float3 pos = particlesIn[i].position;
 
-    // clamp to box
-    pred.x = clamp(pred.x, -boxSizeXZ, boxSizeXZ);
-    pred.y = clamp(pred.y, 0.0f, boxSizeY);
-    pred.z = clamp(pred.z, -boxSizeXZ, boxSizeXZ);
+    // // clamp to box
+    // pred.x = clamp(pred.x, -boxSizeXZ, boxSizeXZ);
+    // pred.y = clamp(pred.y, 0.0f, boxSizeY);
+    // pred.z = clamp(pred.z, -boxSizeXZ, boxSizeXZ);
 
-    // derive velocity from displacement
-    float3 vel = damping * (pred - pos) / dt;
+    // // derive velocity from displacement
+    // float3 vel = damping * (pred - pos) / dt;
 
-    // kill velocity pointing into walls
-    if (pred.x <= -boxSizeXZ && vel.x < 0.0f) vel.x = 0.0f;
-    if (pred.x >=  boxSizeXZ && vel.x > 0.0f) vel.x = 0.0f;
-    if (pred.y <= 0.0f && vel.y < 0.0f) vel.y = 0.0f;
-    if (pred.z <= -boxSizeXZ && vel.z < 0.0f) vel.z = 0.0f;
-    if (pred.z >=  boxSizeXZ && vel.z > 0.0f) vel.z = 0.0f;
+    // // kill velocity pointing into walls
+    // if (pred.x <= -boxSizeXZ && vel.x < 0.0f) vel.x = 0.0f;
+    // if (pred.x >=  boxSizeXZ && vel.x > 0.0f) vel.x = 0.0f;
+    // if (pred.y <= 0.0f && vel.y < 0.0f) vel.y = 0.0f;
+    // if (pred.z <= -boxSizeXZ && vel.z < 0.0f) vel.z = 0.0f;
+    // if (pred.z >=  boxSizeXZ && vel.z > 0.0f) vel.z = 0.0f;
 
-    // apply XSPH
-    vel += float3(particlesIn[i].xsph) * viscosity;
+    // // apply XSPH
+    // vel += float3(particlesIn[i].xsph) * viscosity;
 
-    particlesIn[i].predictedPosition = pred;
-    particlesIn[i].velocity = vel;
-    particlesIn[i].position = pred;
+    // particlesIn[i].predictedPosition = pred;
+    // particlesIn[i].velocity = vel;
+    // particlesIn[i].position = pred;
 }
 
 // from https://github.com/gtaharaedmonds/marching-cubes-gpu/tree/master

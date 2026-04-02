@@ -19,7 +19,10 @@ public:
 
     XMMATRIX GetViewMatrix() const;
     XMMATRIX GetProjectionMatrix(float aspectRatio) const;
-    
+
+private:
+    void updateCameraVectors();
+
     XMFLOAT3 m_position;
     XMFLOAT3 m_front;
     XMFLOAT3 m_up;
@@ -35,7 +38,4 @@ public:
 
     // key state
     bool m_keys[256] = {};
-
-private:
-    void updateCameraVectors();
 };
