@@ -102,9 +102,13 @@ private:
     ComPtr<ID3D12CommandQueue> m_computeCommandQueue;
     ComPtr<ID3D12GraphicsCommandList> m_computeCommandList;
 
-
     ComPtr<ID3D12Fence> m_computeFence;
     UINT64 m_computeFenceValue = 0;
+
+    // ----- marching cubes -----
+    ComPtr<ID3D12Resource> m_mcVertexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW m_mcVertexBufferView;
+    UINT m_mcMaxVertices = 0;
 
     // ----- Camera stuff -----
     ComPtr<ID3D12Resource> m_constantBuffer;

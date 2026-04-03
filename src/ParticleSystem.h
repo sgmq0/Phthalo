@@ -35,6 +35,8 @@ public:
 
     // various getters for private variables
     ComPtr<ID3D12PipelineState> GetPsoClear();
+    ID3D12Resource* GetMCVertexBuffer() const { return m_mcVertexBuffer.Get(); }
+    ID3D12Resource* GetMCArgBuffer() const { return m_mcIndirectArgs.Get(); }
 
     // instancing member variables
     std::vector<Particle> m_particles;

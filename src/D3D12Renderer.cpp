@@ -69,7 +69,7 @@ void D3D12Renderer::OnUpdate()
 	m_particleSystem.ReadbackParticleData(m_computeCommandList.Get());
 	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
 
-	m_particleSystem.ReadbackVertexData(m_computeCommandList.Get());
+	//m_particleSystem.ReadbackVertexData(m_computeCommandList.Get());
 
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;
@@ -449,6 +449,25 @@ void D3D12Renderer::CreateBuffers()
 		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
+
+	// create buffer view for vertices
+	{
+		const UINT bufferSize = m_particleSystem.MC_MAX_TRIS * 3 * sizeof(Vertex);
+
+		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&heapProps,
+			D3D12_HEAP_FLAG_NONE,
+			&bufferDesc,
+			D3D12_RESOURCE_STATE_GENERIC_READ,
+			nullptr,
+			IID_PPV_ARGS(&m_mcVertexBuffer)));
+
+		m_mcVertexBufferView.BufferLocation = m_mcVertexBuffer->GetGPUVirtualAddress();
+		m_mcVertexBufferView.StrideInBytes = sizeof(Vertex);
+		m_mcVertexBufferView.SizeInBytes = bufferSize;
+	}
 }
 
 void D3D12Renderer::PopulateCommandList()
@@ -465,6 +484,13 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->RSSetViewports(1, &m_viewport);
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);
 	m_commandList->SetGraphicsRootConstantBufferView(0, m_constantBuffer->GetGPUVirtualAddress());
+
+		// resource barrier for vertex buffer
+	CD3DX12_RESOURCE_BARRIER toVB = CD3DX12_RESOURCE_BARRIER::Transition(
+		m_particleSystem.GetMCVertexBuffer(),
+		D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+	m_commandList->ResourceBarrier(1, &toVB);
 
 	// create resource barriers and stuff for back buffer
 	CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
@@ -492,6 +518,13 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->IASetVertexBuffers(0, 2, views);
 	m_commandList->IASetIndexBuffer(&m_indexBufferView);
 	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+
+	// release resource barrier for vertex buffer
+	CD3DX12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+		m_particleSystem.GetMCVertexBuffer(),
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+		D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+	m_commandList->ResourceBarrier(1, &toUAV);
 
 	// present back buffer
 	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
