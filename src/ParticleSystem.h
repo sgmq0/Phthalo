@@ -52,12 +52,12 @@ public:
     // consts we use in finalization step
     const float DAMPING = 0.999f;
     const float VISCOSITY = 0.1f;
-    const int ITERATIONS = 1;
+    const int ITERATIONS = 2;
 
     // uniform grid search consts
-    const UINT NS_GRID_DIM_X = UINT(BBOX_SIZE_XZ * 2 / CELL_SIZE) + 2;
-    const UINT NS_GRID_DIM_Y = UINT(BBOX_SIZE_Y / CELL_SIZE) + 2;
-    const UINT NS_GRID_DIM_Z = UINT(BBOX_SIZE_XZ * 2 / CELL_SIZE) + 2;
+    const UINT NS_GRID_DIM_X = (UINT)ceil((BBOX_SIZE_XZ * 2) / CELL_SIZE) + 2;
+    const UINT NS_GRID_DIM_Y = (UINT)ceil(BBOX_SIZE_Y / CELL_SIZE) + 2;
+    const UINT NS_GRID_DIM_Z = (UINT)ceil((BBOX_SIZE_XZ * 2) / CELL_SIZE) + 2;
     const UINT NS_NUM_CELLS = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
     
     bool m_nsFirstFrame = true;
@@ -93,6 +93,9 @@ private:
 
     // delta kernel
     ComPtr<ID3D12PipelineState> m_psoComputeDelta;
+
+    // solve collision constraints kernel 
+    ComPtr<ID3D12PipelineState> m_psoCollisionConstraints;
 
     // xsph kernel
     ComPtr<ID3D12PipelineState> m_psoComputeXSPH;

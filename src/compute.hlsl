@@ -19,12 +19,14 @@ cbuffer NSConstants : register(b0) {
     float cellSize;     // size of each of the boxes, this is the same as H
     int3 gridDim;       // how many cells in each dimension
     int numParticles;   // number of particles in total
+    float3 size;        // size of the bounding box
+    float _pad;
     int numCells;       // number of cells overall
     float dt;           // just the timestep
     float H;            // smoothing
     float RHO_0;        // rest density
     float EPSILON;
-    int3 _pad;
+    float3 _pad1;
 };
 
 RWStructuredBuffer<int> cellCount : register(u0);
@@ -272,7 +274,7 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
             float3 r = pos_i - pos_j;
             
             // denominator calcs
-            float3 grad = 1.0f * SpikyGradient(pos_i - pos_j, H) / RHO_0; // calc grad constraint
+            float3 grad = -SpikyGradient(pos_i - pos_j, H) / RHO_0; // calc grad constraint
             denominator += dot(grad, grad);
 
             // numerator calcs
@@ -339,7 +341,7 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
 
             float3 r = pos_i - pos_j;
             float poly = Poly6(r, H);
-            float ratio = poly / corr_w;
+            float ratio = (corr_w > 1e-12f) ? (poly / corr_w) : 0.0f;
             float corr = -corr_k * pow(ratio, corr_n);
             float coeff = lambda_i + lambda_j + corr;
             float3 grad = coeff * SpikyGradient(r, H);
@@ -355,6 +357,22 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
     // accumulate into predictedPosition directly
     particlesIn[pi.originalIndex].predictedPosition += delta;
 }
+
+[numthreads(64, 1, 1)]
+void CSCollisionConstraints(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    GPUParticle pi = particlesIn[i];
+
+    float3 posMin = float3(-10.0f, 0, -10.0f);
+    float3 posMax = float3(10.0f, 40.0f, 10.0f);
+    float3 correctedPosition = clamp(pi.predictedPosition, posMin, posMax);
+    
+    particlesIn[i].predictedPosition = correctedPosition;
+}
+
 
 [numthreads(64, 1, 1)]
 void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)

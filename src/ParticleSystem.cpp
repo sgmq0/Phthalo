@@ -117,6 +117,9 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3DBlob> computeDelta = CompileHelper(shaderPath, "CSComputeDelta");
     m_psoComputeDelta = MakePSOHelper(computeDelta.Get(), m_computeRootSignature.Get(), device);
 
+    ComPtr<ID3DBlob> collisionConstraints = CompileHelper(shaderPath, "CSCollisionConstraints");
+    m_psoCollisionConstraints = MakePSOHelper(collisionConstraints.Get(), m_computeRootSignature.Get(), device);
+
     ComPtr<ID3DBlob> computeXSPH = CompileHelper(shaderPath, "CSComputeXSPH");
     m_psoComputeXSPH = MakePSOHelper(computeXSPH.Get(), m_computeRootSignature.Get(), device);
 
@@ -199,7 +202,13 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
         auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
         cmdList->ResourceBarrier(1, &b2);
 
-        // compute xsph
+        // run some kernel here to solve for collision constraints
+        cmdList->SetPipelineState(m_psoCollisionConstraints.Get());
+        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+        auto b4 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+        cmdList->ResourceBarrier(1, &b4);
+
+        // xsph
         cmdList->SetPipelineState(m_psoComputeXSPH.Get());
         cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
         auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
@@ -222,12 +231,14 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
         float cellSize;
         int gridDimX, gridDimY, gridDimZ;
         int numParticles;
+        float sizeX, sizeY, sizeZ;
+        float _pad;
         int numCells;
         float dt;
         float H;
         float rho_0;        // rest density
         float epsilon;
-        int _pad[3];
+        float _pad1[3];
     };
     NSConstants cb;
     cb.gridOrigin = XMFLOAT3(-BBOX_SIZE_XZ - CELL_SIZE, - CELL_SIZE, -BBOX_SIZE_XZ - CELL_SIZE);
@@ -236,6 +247,9 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
     cb.gridDimY = NS_GRID_DIM_Y;
     cb.gridDimZ = NS_GRID_DIM_Z;
     cb.numParticles = (int)NUM_PARTICLES;
+    cb.sizeX = BBOX_SIZE_XZ;
+    cb.sizeY = BBOX_SIZE_Y;
+    cb.sizeZ = BBOX_SIZE_XZ;
     cb.numCells = NS_NUM_CELLS;
     cb.dt = dt;
     cb.H = CELL_SIZE;   // cell size is also the smoothing radius
@@ -396,13 +410,13 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList)
         XMFLOAT3& pos  = m_particles[i].position;
 
         // solve collision constraints
-        XMVECTOR v = XMLoadFloat3(&pred);
-        XMVECTOR minVec = XMVectorSet(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ, 0.0f);
-        XMVECTOR maxVec = XMVectorSet(BBOX_SIZE_XZ, BBOX_SIZE_Y, BBOX_SIZE_XZ, 0.0f);
+        // XMVECTOR v = XMLoadFloat3(&pred);
+        // XMVECTOR minVec = XMVectorSet(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ, 0.0f);
+        // XMVECTOR maxVec = XMVectorSet(BBOX_SIZE_XZ, BBOX_SIZE_Y, BBOX_SIZE_XZ, 0.0f);
 
-        v = XMVectorMax(v, minVec);
-        v = XMVectorMin(v, maxVec);
-        XMStoreFloat3(&pred, v);
+        // v = XMVectorMax(v, minVec);
+        // v = XMVectorMin(v, maxVec);
+        // XMStoreFloat3(&pred, v);
 
         // derive velocity from the displacement (this is PBD -- velocity comes last)
         m_particles[i].velocity.x = DAMPING * (pred.x - pos.x) / dt;
@@ -410,11 +424,11 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList)
         m_particles[i].velocity.z = DAMPING * (pred.z - pos.z) / dt;
 
         // kill the component pointing into the wall, after velocity is computed
-        if (pred.x <= -BBOX_SIZE_XZ && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
-        if (pred.x >= BBOX_SIZE_XZ && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
-        if (pred.y <= 0.0f && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
-        if (pred.z <= -BBOX_SIZE_XZ && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
-        if (pred.z >= BBOX_SIZE_XZ && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
+        // if (pred.x <= -BBOX_SIZE_XZ && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
+        // if (pred.x >= BBOX_SIZE_XZ && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
+        // if (pred.y <= 0.0f && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
+        // if (pred.z <= -BBOX_SIZE_XZ && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
+        // if (pred.z >= BBOX_SIZE_XZ && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
 
         // todo: vorticity
 
