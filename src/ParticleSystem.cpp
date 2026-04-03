@@ -196,24 +196,29 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
         cmdList->ResourceBarrier(1, &lambdaBarrier);
 
         // compute delta rho
-        // step 5: compute and apply delta
+        // step 5: compute delta
         cmdList->SetPipelineState(m_psoComputeDelta.Get());
         cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
         auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
         cmdList->ResourceBarrier(1, &b2);
 
-        // run some kernel here to solve for collision constraints
+        // perform collision detection and response
+        // also updates predicted position using delta
         cmdList->SetPipelineState(m_psoCollisionConstraints.Get());
         cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
         auto b4 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
         cmdList->ResourceBarrier(1, &b4);
-
-        // xsph
-        cmdList->SetPipelineState(m_psoComputeXSPH.Get());
-        cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-        auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-        cmdList->ResourceBarrier(1, &b3);
     }
+
+    // insert kernel to update velocity
+
+    // xsph
+    cmdList->SetPipelineState(m_psoComputeXSPH.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    cmdList->ResourceBarrier(1, &b3);
+
+    // insert kernel to update position
 
     // finalize
     // cmdList->SetPipelineState(m_psoComputeFinalize.Get());
@@ -283,6 +288,7 @@ void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, floa
         gpu[i].density = m_particles[i].density;
         gpu[i].lambda = m_particles[i].lambda;
         gpu[i].xsph = m_particles[i].xsph;
+        gpu[i].delta = m_particles[i].delta;
     }
 
     void* mapped = nullptr;

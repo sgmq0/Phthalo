@@ -12,6 +12,8 @@ struct GPUParticle {
     float2 _pad2;
     float3 xsph;
     float _pad3;
+    float3 delta;
+    float _pad4;
 };
 
 cbuffer NSConstants : register(b0) {
@@ -315,7 +317,7 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
     // tensile correction constants
     const float corr_n = 4.0f;
     const float corr_h = 0.30f;
-    const float corr_k = 1e-04f;
+    const float corr_k = 1e-02f;
     const float corr_w = Poly6(float3(corr_h * H, 0.0f, 0.0f), H);
 
     // calculate delta p
@@ -355,7 +357,7 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
     delta /= RHO_0;
 
     // accumulate into predictedPosition directly
-    particlesIn[pi.originalIndex].predictedPosition += delta;
+    particlesIn[pi.originalIndex].delta = delta;
 }
 
 [numthreads(64, 1, 1)]
@@ -371,6 +373,7 @@ void CSCollisionConstraints(uint3 tid : SV_DispatchThreadID)
     float3 correctedPosition = clamp(pi.predictedPosition, posMin, posMax);
     
     particlesIn[i].predictedPosition = correctedPosition;
+    particlesIn[i].predictedPosition += pi.delta;
 }
 
 

@@ -34,6 +34,7 @@ struct Particle {
     float density;
     float lambda;
     XMFLOAT3 xsph;
+    XMFLOAT3 delta;
     std::vector<int> neighbors;
 };
 
@@ -49,6 +50,8 @@ struct GPUParticle {
     float _pad2[2];
     XMFLOAT3 xsph;
     float _pad3;
+    XMFLOAT3 delta;
+    float _pad4;
 };
 
 struct NSConstants {
