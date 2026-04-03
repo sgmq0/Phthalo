@@ -376,6 +376,23 @@ void CSCollisionConstraints(uint3 tid : SV_DispatchThreadID)
     particlesIn[i].predictedPosition += pi.delta;
 }
 
+[numthreads(64, 1, 1)]
+void CSUpdateVelocity(uint3 tid : SV_DispatchThreadID)
+{
+    int i = (int)tid.x;
+    if (i >= numParticles) return;
+
+    GPUParticle pi = particlesOut[i];  // sorted slot i
+    int orig = pi.originalIndex;
+
+    float3 pos  = particlesIn[orig].position;
+    float3 pred = particlesIn[orig].predictedPosition;
+
+    const float DAMPING = 0.999f;
+    float3 vel = DAMPING * (pred - pos) / dt;
+
+    particlesOut[orig].velocity = vel;
+}
 
 [numthreads(64, 1, 1)]
 void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)
@@ -483,7 +500,7 @@ void CSFinalize(uint3 tid : SV_DispatchThreadID)
     // particlesIn[i].position = pred;
 }
 
-// from https://github.com/gtaharaedmonds/marching-cubes-gpu/tree/master
+// from https://graphics.stanford.edu/~mdfisher/MarchingCubes.html
 static const uint edgeTable[256] = {
     0x0, 0x109, 0x203, 0x30a, 0x80c, 0x905, 0xa0f, 0xb06, 
 	0x406, 0x50f, 0x605, 0x70c, 0xc0a, 0xd03, 0xe09, 0xf00, 

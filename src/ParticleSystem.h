@@ -97,6 +97,9 @@ private:
     // solve collision constraints kernel 
     ComPtr<ID3D12PipelineState> m_psoCollisionConstraints;
 
+    // apply velocity
+    ComPtr<ID3D12PipelineState> m_psoUpdateVelocity;
+
     // xsph kernel
     ComPtr<ID3D12PipelineState> m_psoComputeXSPH;
 

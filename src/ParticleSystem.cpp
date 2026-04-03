@@ -120,6 +120,9 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3DBlob> collisionConstraints = CompileHelper(shaderPath, "CSCollisionConstraints");
     m_psoCollisionConstraints = MakePSOHelper(collisionConstraints.Get(), m_computeRootSignature.Get(), device);
 
+    ComPtr<ID3DBlob> updateVelocity = CompileHelper(shaderPath, "CSUpdateVelocity");
+    m_psoUpdateVelocity = MakePSOHelper(updateVelocity.Get(), m_computeRootSignature.Get(), device);
+
     ComPtr<ID3DBlob> computeXSPH = CompileHelper(shaderPath, "CSComputeXSPH");
     m_psoComputeXSPH = MakePSOHelper(computeXSPH.Get(), m_computeRootSignature.Get(), device);
 
@@ -211,6 +214,10 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     }
 
     // insert kernel to update velocity
+    // cmdList->SetPipelineState(m_psoUpdateVelocity.Get());
+    // cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    // auto b5 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
+    // cmdList->ResourceBarrier(1, &b5);
 
     // xsph
     cmdList->SetPipelineState(m_psoComputeXSPH.Get());
@@ -219,12 +226,6 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     cmdList->ResourceBarrier(1, &b3);
 
     // insert kernel to update position
-
-    // finalize
-    // cmdList->SetPipelineState(m_psoComputeFinalize.Get());
-    // cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    // auto b4 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-    // cmdList->ResourceBarrier(1, &b4);
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
@@ -394,6 +395,7 @@ void ParticleSystem::ReadbackParticleData(ID3D12GraphicsCommandList* cmdList)
         reinterpret_cast<void**>(&readback));
 
     for (int i = 0; i < NUM_PARTICLES; i++) {
+        m_particles[i].position = readback[i].position;
         m_particles[i].predictedPosition = readback[i].predictedPosition;
         m_particles[i].velocity = readback[i].velocity;
         m_particles[i].lambda = readback[i].lambda;
@@ -415,26 +417,10 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList)
         XMFLOAT3& pred = m_particles[i].predictedPosition;
         XMFLOAT3& pos  = m_particles[i].position;
 
-        // solve collision constraints
-        // XMVECTOR v = XMLoadFloat3(&pred);
-        // XMVECTOR minVec = XMVectorSet(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ, 0.0f);
-        // XMVECTOR maxVec = XMVectorSet(BBOX_SIZE_XZ, BBOX_SIZE_Y, BBOX_SIZE_XZ, 0.0f);
-
-        // v = XMVectorMax(v, minVec);
-        // v = XMVectorMin(v, maxVec);
-        // XMStoreFloat3(&pred, v);
-
         // derive velocity from the displacement (this is PBD -- velocity comes last)
         m_particles[i].velocity.x = DAMPING * (pred.x - pos.x) / dt;
         m_particles[i].velocity.y = DAMPING * (pred.y - pos.y) / dt;
         m_particles[i].velocity.z = DAMPING * (pred.z - pos.z) / dt;
-
-        // kill the component pointing into the wall, after velocity is computed
-        // if (pred.x <= -BBOX_SIZE_XZ && m_particles[i].velocity.x < 0.0f) m_particles[i].velocity.x = 0.0f;
-        // if (pred.x >= BBOX_SIZE_XZ && m_particles[i].velocity.x > 0.0f) m_particles[i].velocity.x = 0.0f;
-        // if (pred.y <= 0.0f && m_particles[i].velocity.y < 0.0f) m_particles[i].velocity.y = 0.0f;
-        // if (pred.z <= -BBOX_SIZE_XZ && m_particles[i].velocity.z < 0.0f) m_particles[i].velocity.z = 0.0f;
-        // if (pred.z >= BBOX_SIZE_XZ && m_particles[i].velocity.z > 0.0f) m_particles[i].velocity.z = 0.0f;
 
         // todo: vorticity
 
