@@ -27,6 +27,11 @@ struct InstanceData {
     XMFLOAT4X4 worldMatrix;
 };
 
+struct Vertex
+{
+    float x, y, z, w;
+};
+
 struct Particle {
     XMFLOAT3 position;
     XMFLOAT3 predictedPosition;
@@ -66,3 +71,11 @@ struct NSConstants {
     int _pad[2];
 };
 
+struct MCConstants {
+    XMFLOAT3 mcOrigin; 
+    float mcCellSize;
+    XMINT3 mcDims;
+    float mcIso;
+    int mcMaxTris;
+    float _pad[3];
+};

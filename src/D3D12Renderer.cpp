@@ -51,6 +51,7 @@ void D3D12Renderer::OnUpdate()
 
 	// dispatch gpu commands
 	m_particleSystem.DispatchGPUCommands(m_computeCommandList.Get(), dt);
+	m_particleSystem.DispatchMarchingCubes(m_computeCommandList.Get());
 	m_particleSystem.CopyBackResources(m_computeCommandList.Get());
 
 	// close, execute, and wait
@@ -67,6 +68,8 @@ void D3D12Renderer::OnUpdate()
 
 	m_particleSystem.ReadbackParticleData(m_computeCommandList.Get());
 	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
+
+	m_particleSystem.ReadbackVertexData(m_computeCommandList.Get());
 
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;
