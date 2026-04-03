@@ -43,7 +43,7 @@ groupshared int gs_exclusivePrefix;
 
 float Poly6(float3 r, float h)
 {
-    const float coeff = 315.0 / (64.0 * 3.14159265f);
+    float coeff = 315.0 / (64.0 * 3.14159265f);
 
     float h2 = h * h;
     float r2 = dot(r, r);
@@ -61,7 +61,6 @@ float Poly6(float3 r, float h)
 
 float3 SpikyGradient(float3 r, float h)
 {
-    float coeff = 45.0f / 3.14159265f;
     float norm = length(r);
 
     if (norm > h || norm < 1e-12f) return float3(0, 0, 0);
@@ -249,11 +248,12 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
         gridDim - int3(1,1,1)
     );
 
-    float density = 0.0f;
-    float3 gradSum_i = float3(0, 0, 0);  // sum of gradients w.r.t. i (self term)
-    float denominator = 0.0f;
+    // calc constraint
+    float density = 0.0;
+    float denominator = 0.0;
+    float3 gradSum = float3(0, 0, 0);
 
-    // iterates through neighbors
+    // for neighbors of i (current particle):
     for (int dx = -1; dx <= 1; dx++)
     for (int dy = -1; dy <= 1; dy++)
     for (int dz = -1; dz <= 1; dz++)
@@ -261,36 +261,37 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
         int3 nc = cell + int3(dx, dy, dz);
         if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
 
-        int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
+        int flat = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
         int start = cellStart[flat];
         int count = cellCount[flat];
 
         for (int k = 0; k < count; k++)
         {
-            float3 pos_j = particlesOut[start + k].predictedPosition;
-            float3 r     = pos_i - pos_j;
+            int j = start + k;
+            float3 pos_j = particlesOut[j].predictedPosition;
+            float3 r = pos_i - pos_j;
+            
+            // denominator calcs
+            float3 grad = 1.0f * SpikyGradient(pos_i - pos_j, H) / RHO_0; // calc grad constraint
+            denominator += dot(grad, grad);
 
-            // density (Poly6)
-            density += Poly6(r, H);
+            // numerator calcs
+            density += Poly6(pos_i - pos_j, H);
 
-            // gradient of constraint w.r.t. k=j (eq. 8 denominator, k != i term)
-            float3 grad_j = SpikyGradient(r, H) / RHO_0;
-            denominator  += dot(grad_j, grad_j);
-
-            // accumulate self-term gradient (k == i means sum over all j)
-            gradSum_i += SpikyGradient(r, H);
+            // accumulate self term
+            gradSum += SpikyGradient(pos_i - pos_j, H);
         }
     }
 
-    // add self-term (k == i) to denominator
-    float3 grad_i_self = gradSum_i / RHO_0;
-    denominator += dot(grad_i_self, grad_i_self);
+    float numerator = (density / RHO_0) - 1.0f;
+
+    // factor self term into denominator
+    float3 gradSumFinalized = gradSum / RHO_0;
+    denominator += dot(gradSumFinalized, gradSumFinalized);
     denominator += EPSILON;
 
-    float constraint = (density / RHO_0) - 1.0f;
-
-    // write to originalIndex so CPU-side m_particles[originalIndex] stays in sync
-    particlesIn[pi.originalIndex].lambda = -constraint / denominator;
+    // store lambda
+    particlesIn[pi.originalIndex].lambda = -numerator / denominator;
 }
 
 [numthreads(64, 1, 1)]
@@ -309,14 +310,13 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
         gridDim - int3(1, 1, 1)
     );
 
-    // tensile correction constants — match your CPU values exactly
+    // tensile correction constants
     const float corr_n = 4.0f;
     const float corr_h = 0.30f;
     const float corr_k = 1e-04f;
-    // Poly6 of (corr_h * H, 0, 0)
-    float3 corrVec = float3(corr_h * H, 0.0f, 0.0f);
-    float corr_w = Poly6(corrVec, H);
+    const float corr_w = Poly6(float3(corr_h * H, 0.0f, 0.0f), H);
 
+    // calculate delta p
     float3 delta = float3(0, 0, 0);
 
     for (int dx = -1; dx <= 1; dx++)
@@ -328,22 +328,25 @@ void CSComputeDelta(uint3 tid : SV_DispatchThreadID)
 
         int flat = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
         int start = cellStart[flat];
-        int cellN = cellCount[flat];
+        int count = cellCount[flat];
 
-        for (int k = 0; k < cellN; k++)
+        for (int k = 0; k < count; k++)
         {
+            int j = start + k;
             GPUParticle pj = particlesOut[start + k];
+            float3 pos_j = pj.predictedPosition;
             float lambda_j = particlesIn[pj.originalIndex].lambda;
 
-            float3 r = pos_i - pj.predictedPosition;
-
+            float3 r = pos_i - pos_j;
             float poly = Poly6(r, H);
-            float ratio = (corr_w > 1e-12f) ? (poly / corr_w) : 0.0f;
-            float corr_coeff = -corr_k * pow(ratio, corr_n);
-            float coeff = lambda_i + lambda_j + corr_coeff;
+            float ratio = poly / corr_w;
+            float corr = -corr_k * pow(ratio, corr_n);
+            float coeff = lambda_i + lambda_j + corr;
+            float3 grad = coeff * SpikyGradient(r, H);
 
-            float3 grad = SpikyGradient(r, H);
-            delta += coeff * grad;
+            float lambda_sum = lambda_i + lambda_j;
+
+            delta += grad;
         }
     }
 

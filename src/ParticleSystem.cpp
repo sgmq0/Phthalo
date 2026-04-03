@@ -27,6 +27,9 @@ void ParticleSystem::LoadParticles()
         };
         m_particles[i].velocity = {0, 0, 0};
         m_particles[i].predictedPosition = m_particles[i].position; 
+        m_particles[i].density = 0.0f;
+        m_particles[i].lambda = 0.0f;
+        m_particles[i].xsph = {0.0, 0.0, 0.0};
         i++;
     }
     
@@ -227,15 +230,15 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
         int _pad[3];
     };
     NSConstants cb;
-    cb.gridOrigin = XMFLOAT3(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ);
-    cb.cellSize = SMOOTHING;  // smoothing radius, H
+    cb.gridOrigin = XMFLOAT3(-BBOX_SIZE_XZ - CELL_SIZE, - CELL_SIZE, -BBOX_SIZE_XZ - CELL_SIZE);
+    cb.cellSize = CELL_SIZE;
     cb.gridDimX = NS_GRID_DIM_X;
     cb.gridDimY = NS_GRID_DIM_Y;
     cb.gridDimZ = NS_GRID_DIM_Z;
     cb.numParticles = (int)NUM_PARTICLES;
     cb.numCells = NS_NUM_CELLS;
     cb.dt = dt;
-    cb.H = SMOOTHING;
+    cb.H = CELL_SIZE;   // cell size is also the smoothing radius
     cb.rho_0 = RHO_0;
     cb.epsilon = EPSILON;
 
@@ -392,10 +395,14 @@ void ParticleSystem::UpdatePBD(float dt, ID3D12GraphicsCommandList* cmdList)
         XMFLOAT3& pred = m_particles[i].predictedPosition;
         XMFLOAT3& pos  = m_particles[i].position;
 
-        // clamp predicted position to box
-        pred.x = std::clamp(pred.x, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
-        pred.y = std::clamp(pred.y, 0.0f, BBOX_SIZE_Y);
-        pred.z = std::clamp(pred.z, -BBOX_SIZE_XZ, BBOX_SIZE_XZ);
+        // solve collision constraints
+        XMVECTOR v = XMLoadFloat3(&pred);
+        XMVECTOR minVec = XMVectorSet(-BBOX_SIZE_XZ, 0.0f, -BBOX_SIZE_XZ, 0.0f);
+        XMVECTOR maxVec = XMVectorSet(BBOX_SIZE_XZ, BBOX_SIZE_Y, BBOX_SIZE_XZ, 0.0f);
+
+        v = XMVectorMax(v, minVec);
+        v = XMVectorMin(v, maxVec);
+        XMStoreFloat3(&pred, v);
 
         // derive velocity from the displacement (this is PBD -- velocity comes last)
         m_particles[i].velocity.x = DAMPING * (pred.x - pos.x) / dt;

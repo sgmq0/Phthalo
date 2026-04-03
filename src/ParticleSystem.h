@@ -45,8 +45,8 @@ public:
     // simulation consts
     const float BBOX_SIZE_XZ = 10.0f;
     const float BBOX_SIZE_Y = 100.0f;
-    const float SMOOTHING = 1.0f;
-    const float RHO_0 = 10.0f;          // rest density
+    const float CELL_SIZE = 1.0f;
+    const float RHO_0 = 40.0f;          // rest density
     const float EPSILON = 100.0f;
 
     // consts we use in finalization step
@@ -55,9 +55,9 @@ public:
     const int ITERATIONS = 1;
 
     // uniform grid search consts
-    const UINT NS_GRID_DIM_X = UINT(BBOX_SIZE_XZ * 2 / SMOOTHING);
-    const UINT NS_GRID_DIM_Y = UINT(BBOX_SIZE_Y / SMOOTHING);
-    const UINT NS_GRID_DIM_Z = UINT(BBOX_SIZE_XZ * 2 / SMOOTHING);
+    const UINT NS_GRID_DIM_X = UINT(BBOX_SIZE_XZ * 2 / CELL_SIZE) + 2;
+    const UINT NS_GRID_DIM_Y = UINT(BBOX_SIZE_Y / CELL_SIZE) + 2;
+    const UINT NS_GRID_DIM_Z = UINT(BBOX_SIZE_XZ * 2 / CELL_SIZE) + 2;
     const UINT NS_NUM_CELLS = NS_GRID_DIM_X * NS_GRID_DIM_Y * NS_GRID_DIM_Z;
     
     bool m_nsFirstFrame = true;
