@@ -70,7 +70,7 @@ float Poly6(float3 r, float h)
         return 0.0;
     }
 
-    float h9 = pow(h, 9);
+    float h9 = pow(abs(h), 9);
     float diff = h2 - r2;
     float diff3 = diff * diff * diff;
 
@@ -111,7 +111,7 @@ void CSClearCells(uint3 tid : SV_DispatchThreadID) {
 [numthreads(64, 1, 1)]
 void CSClearStatus(uint3 tid : SV_DispatchThreadID) {
     uint numGroups = ((uint)numCells + 255) / 256;
-    if ((int)tid.x < numGroups)
+    if (tid.x < numGroups)
         statusBuf[tid.x] = 0u;
 }
 
@@ -455,10 +455,10 @@ void CSComputeXSPH(uint3 tid : SV_DispatchThreadID)
 
     float3 xsph = float3(0, 0, 0);
 
-    for (int dx = -1; dx <= 1; dx++) {
+    for (int dx2 = -1; dx2 <= 1; dx2++) {
         for (int dy = -1; dy <= 1; dy++) {
             for (int dz = -1; dz <= 1; dz++) {
-                int3 nc = cell + int3(dx, dy, dz);
+                int3 nc = cell + int3(dx2, dy, dz);
                 if (any(nc < int3(0,0,0)) || any(nc >= gridDim)) continue;
                 int flat  = nc.x + nc.y * gridDim.x + nc.z * gridDim.x * gridDim.y;
                 int start = cellStart[flat];
@@ -878,15 +878,15 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
 
     // build lookup index
     uint cubeIdx = 0;
-    [unroll] for (int i = 0; i < 8; i++)
-        if (val[i] < mcIso) cubeIdx |= (1u << i);
+    [unroll] for (int i2 = 0; i2 < 8; i2++)
+        if (val[i2] < mcIso) cubeIdx |= (1u << i2);
 
     if (edgeTable[cubeIdx] == 0) return;
 
     // interpolate edge vertices
     float3 worldCorners[8];
-    [unroll] for (int i = 0; i < 8; i++)
-        worldCorners[i] = mcOrigin + float3(corners[i]) * mcCellSize;
+    [unroll] for (int i3 = 0; i3 < 8; i3++)
+        worldCorners[i3] = mcOrigin + float3(corners[i3]) * mcCellSize;
 
     float3 edgeVerts[12];
     #define LERP_EDGE(e, a, b) \
@@ -918,7 +918,7 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
 
         uint slot;
         InterlockedAdd(mcArgs[0], 3u, slot);
-        if (slot + 2 < mcMaxTris * 3) {
+        if (slot + 2 < (uint)mcMaxTris * 3) {
             
             // encode normal later
             mcVertexBuffer[slot] = float4(v0, 1.0f);

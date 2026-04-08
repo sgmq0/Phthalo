@@ -69,7 +69,7 @@ void D3D12Renderer::OnUpdate()
 	m_particleSystem.ReadbackParticleData(m_computeCommandList.Get());
 	m_particleSystem.UpdatePBD(dt, m_computeCommandList.Get());
 
-	//m_particleSystem.ReadbackVertexData(m_computeCommandList.Get());
+	m_particleSystem.ReadbackVertexData(m_computeCommandList.Get());
 
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;
@@ -188,6 +188,17 @@ void D3D12Renderer::LoadPipeline()
 		// create command allocator
 		ThrowIfFailed(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&m_commandAllocators[n])));
 	}
+
+	// set up command signature for indirect draw
+	D3D12_INDIRECT_ARGUMENT_DESC argDesc = {};
+	argDesc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW;
+
+	D3D12_COMMAND_SIGNATURE_DESC sigDesc = {};
+	sigDesc.ByteStride = sizeof(D3D12_DRAW_ARGUMENTS);
+	sigDesc.NumArgumentDescs = 1;
+	sigDesc.pArgumentDescs = &argDesc;
+
+	m_device->CreateCommandSignature(&sigDesc, nullptr, IID_PPV_ARGS(&m_mcCommandSignature));
 
 	// also, disable alt+enter full-screen transitions - too jank
 	ThrowIfFailed(factory->MakeWindowAssociation(Win32Application::GetHwnd(), DXGI_MWA_NO_ALT_ENTER));
@@ -449,25 +460,54 @@ void D3D12Renderer::CreateBuffers()
 		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
-
-	// create buffer view for vertices
+	// -------- create the indirect buffer for marching cubes ----------
 	{
-		const UINT bufferSize = m_particleSystem.MC_MAX_TRIS * 3 * sizeof(Vertex);
+		const UINT argBufferSize = D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT;
 
-		CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-		CD3DX12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize);
+		CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+		CD3DX12_RESOURCE_DESC argDesc = CD3DX12_RESOURCE_DESC::Buffer(
+			argBufferSize,
+			D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 		ThrowIfFailed(m_device->CreateCommittedResource(
-			&heapProps,
+			&defaultHeap,
 			D3D12_HEAP_FLAG_NONE,
-			&bufferDesc,
+			&argDesc,
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			nullptr,
+			IID_PPV_ARGS(&m_mcArgBuffer)));
+
+		// upload the initial values via a temporary upload buffer
+		D3D12_DRAW_ARGUMENTS initArgs = {};
+		initArgs.VertexCountPerInstance = 0;
+		initArgs.InstanceCount = 1;
+		initArgs.StartVertexLocation = 0;
+		initArgs.StartInstanceLocation = 0;
+
+		ComPtr<ID3D12Resource> uploadBuf;
+		CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+		CD3DX12_RESOURCE_DESC uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(argBufferSize);
+		ThrowIfFailed(m_device->CreateCommittedResource(
+			&uploadHeap,
+			D3D12_HEAP_FLAG_NONE,
+			&uploadDesc,
 			D3D12_RESOURCE_STATE_GENERIC_READ,
 			nullptr,
-			IID_PPV_ARGS(&m_mcVertexBuffer)));
+			IID_PPV_ARGS(&uploadBuf)));
 
-		m_mcVertexBufferView.BufferLocation = m_mcVertexBuffer->GetGPUVirtualAddress();
-		m_mcVertexBufferView.StrideInBytes = sizeof(Vertex);
-		m_mcVertexBufferView.SizeInBytes = bufferSize;
+		void* mapped = nullptr;
+		uploadBuf->Map(0, nullptr, &mapped);
+		memcpy(mapped, &initArgs, sizeof(initArgs));
+		uploadBuf->Unmap(0, nullptr);
+
+		m_commandList->CopyResource(m_mcArgBuffer.Get(), uploadBuf.Get());
+
+		CD3DX12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
+			m_mcArgBuffer.Get(),
+			D3D12_RESOURCE_STATE_COPY_DEST,
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+		m_commandList->ResourceBarrier(1, &toUAV);
 	}
+
 }
 
 void D3D12Renderer::PopulateCommandList()
@@ -485,21 +525,22 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->RSSetScissorRects(1, &m_scissorRect);
 	m_commandList->SetGraphicsRootConstantBufferView(0, m_constantBuffer->GetGPUVirtualAddress());
 
-		// resource barrier for vertex buffer
-	CD3DX12_RESOURCE_BARRIER toVB = CD3DX12_RESOURCE_BARRIER::Transition(
-		m_particleSystem.GetMCVertexBuffer(),
-		D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-	m_commandList->ResourceBarrier(1, &toVB);
-
-	// create resource barriers and stuff for back buffer
-	CD3DX12_RESOURCE_BARRIER barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		m_renderTargets[m_frameIndex].Get(),
-		D3D12_RESOURCE_STATE_PRESENT,
-		D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-	m_commandList->ResourceBarrier(1, &barrier);
-
+	// resource barrier for vertex buffer
+	CD3DX12_RESOURCE_BARRIER preDraw[] = {
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_particleSystem.GetMCVertexBuffer(),
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+			D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER),
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_particleSystem.GetMCArgBuffer(),
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+			D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT),
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderTargets[m_frameIndex].Get(),
+			D3D12_RESOURCE_STATE_PRESENT,
+			D3D12_RESOURCE_STATE_RENDER_TARGET),
+	};
+	m_commandList->ResourceBarrier(_countof(preDraw), preDraw);
 	// get handles
 	CD3DX12_CPU_DESCRIPTOR_HANDLE rtvHandle(m_rtvHeap->GetCPUDescriptorHandleForHeapStart(), m_frameIndex, m_rtvDescriptorSize);
 	CD3DX12_CPU_DESCRIPTOR_HANDLE dsvHandle(m_dsvHeap->GetCPUDescriptorHandleForHeapStart());
@@ -508,30 +549,45 @@ void D3D12Renderer::PopulateCommandList()
 	const float clearColor[] = { 0.0f, 0.2f, 0.4f, 1.0f };
 	m_commandList->ClearRenderTargetView(rtvHandle, clearColor, 0, nullptr);
 	m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-
-	// bind render targets
-	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle);
+	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle); // bind render targets
 
 	// indexed draw
+	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	// D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
+	// m_commandList->IASetVertexBuffers(0, 2, views);
+	// m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	// m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+
+	D3D12_VERTEX_BUFFER_VIEW mcView;
+	mcView.BufferLocation = m_particleSystem.GetMCVertexBuffer()->GetGPUVirtualAddress();
+	mcView.StrideInBytes = sizeof(Vertex);
+	mcView.SizeInBytes = m_particleSystem.MC_MAX_TRIS * 3 * sizeof(Vertex);
+
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
-	m_commandList->IASetVertexBuffers(0, 2, views);
-	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+	m_commandList->IASetVertexBuffers(0, 1, &mcView);
+	m_commandList->ExecuteIndirect(
+		m_mcCommandSignature.Get(),
+		1,
+		m_mcArgBuffer.Get(),
+		0,
+		nullptr,
+		0);
 
-	// release resource barrier for vertex buffer
-	CD3DX12_RESOURCE_BARRIER toUAV = CD3DX12_RESOURCE_BARRIER::Transition(
-		m_particleSystem.GetMCVertexBuffer(),
-		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
-		D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	m_commandList->ResourceBarrier(1, &toUAV);
-
-	// present back buffer
-	CD3DX12_RESOURCE_BARRIER barrier2 = CD3DX12_RESOURCE_BARRIER::Transition(
-		m_renderTargets[m_frameIndex].Get(),
-		D3D12_RESOURCE_STATE_RENDER_TARGET,
-		D3D12_RESOURCE_STATE_PRESENT);
-	m_commandList->ResourceBarrier(1, &barrier2);
+	CD3DX12_RESOURCE_BARRIER postDraw[] = {
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_particleSystem.GetMCVertexBuffer(),
+			D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_particleSystem.GetMCArgBuffer(),
+			D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT,
+			D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+		CD3DX12_RESOURCE_BARRIER::Transition(
+			m_renderTargets[m_frameIndex].Get(),
+			D3D12_RESOURCE_STATE_RENDER_TARGET,
+			D3D12_RESOURCE_STATE_PRESENT),
+	};
+	m_commandList->ResourceBarrier(_countof(postDraw), postDraw);
 
 	ThrowIfFailed(m_commandList->Close());
 }
