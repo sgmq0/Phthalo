@@ -530,14 +530,16 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
 	m_commandList->IASetVertexBuffers(0, 2, views);
-	//m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	//m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+	m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
 
 	// marching cube mesh
-	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
-	//m_commandList->IASetIndexBuffer(nullptr);
-	m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
+	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	// D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
+	// m_commandList->IASetVertexBuffers(0, 2, views);
+	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	// m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
+	// m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
 
 	// transition back resources
 	CD3DX12_RESOURCE_BARRIER postDraw[] = {
