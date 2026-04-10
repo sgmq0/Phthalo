@@ -927,3 +927,39 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
         }
     }
 }
+
+// one thread per voxel
+// [numthreads(8, 8, 8)]
+// void GenerateSDF(uint3 id : SV_DispatchThreadID)
+// {
+//     float3 voxelPos = GridToWorld(id); // convert voxel index to world space
+
+//     float weightSum   = 0.0;
+//     float3 weightedPos = float3(0, 0, 0);
+
+//     // iterate over neighboring particles (from your neighbor search structure)
+//     for each neighbor particle i within radius R:
+//     {
+//         float3 diff = voxelPos - particlePos[i];
+//         float  d    = length(diff);
+
+//         float t = 1.0 - (d * d) / (R * R);
+//         float w = max(0.0, t * t * t);   // 6th order: (1 - d²/r²)³
+
+//         weightSum    += w;
+//         weightedPos  += particlePos[i] * w;
+//     }
+
+//     float sdf;
+//     if (weightSum > 0.0)
+//     {
+//         weightedPos /= weightSum;
+//         sdf = length(voxelPos - weightedPos) - particleRadius;
+//     }
+//     else
+//     {
+//         sdf = R; // no particles nearby, far outside surface
+//     }
+
+//     sdfVolume[id] = sdf;
+// }

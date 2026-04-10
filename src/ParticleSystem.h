@@ -14,6 +14,7 @@ public:
     void CreateComputePipeline(
         ID3D12Device* device,
         std::wstring shaderPath,
+        std::wstring mcShaderPath,
         ComPtr<ID3D12CommandAllocator>& commandAllocator,
         ComPtr<ID3D12GraphicsCommandList>& commandList
     );
@@ -45,9 +46,9 @@ public:
     std::vector<Vertex> m_vertices;
 
     // --------- CONSTANTS --------
-    static const UINT NUM_PARTICLES = 50000;
-    const float PARTICLE_SIZE = 0.1f;
-    const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
+    static const UINT NUM_PARTICLES = 100000;
+    const float PARTICLE_SIZE = 0.05f;
+    const float PARTICLE_SPACING = 0.2f;    // how far the particles spawn from each other
 
     // simulation consts
     const float BBOX_SIZE_XZ = 10.0f;

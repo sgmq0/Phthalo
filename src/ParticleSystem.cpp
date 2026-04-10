@@ -71,6 +71,7 @@ ComPtr<ID3D12Resource> MakeBufferHelper(UINT byteSize, ID3D12Device* device)
 void ParticleSystem::CreateComputePipeline(
     ID3D12Device *device,
     std::wstring shaderPath,
+    std::wstring mcShaderPath,
     ComPtr<ID3D12CommandAllocator> &commandAllocator,
     ComPtr<ID3D12GraphicsCommandList> &commandList)
 {

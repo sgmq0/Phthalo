@@ -26,8 +26,9 @@ public:
 
     void ParseCommandLineArgs(_In_reads_(argc) WCHAR* argv[], int argc);
 
-protected:
     std::wstring GetAssetFullPath(LPCWSTR assetName);
+
+protected:
 
     void GetHardwareAdapter(
         _In_ IDXGIFactory1* pFactory,

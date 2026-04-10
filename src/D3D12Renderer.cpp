@@ -215,7 +215,8 @@ void D3D12Renderer::LoadAssets()
 	// function in m_particleSystem to setup the compute pipeline
 	m_particleSystem.CreateComputePipeline(
         m_device.Get(),
-        GetAssetFullPath(L"compute.hlsl"),
+        GetAssetFullPath(L"particles.hlsl"),
+		GetAssetFullPath(L"marchingCubes.hlsl"),
         m_computeAllocator,
         m_computeCommandList);
 
@@ -527,19 +528,19 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle); // bind render targets
 
 	// indexed draw
-	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
-	m_commandList->IASetVertexBuffers(0, 2, views);
-	m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
-
-	// marching cube mesh
 	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	// D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
 	// m_commandList->IASetVertexBuffers(0, 2, views);
-	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	// m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
-	// m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
+	// m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	// m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+
+	// marching cube mesh
+	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
+	m_commandList->IASetVertexBuffers(0, 2, views);
+	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
+	m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
 
 	// transition back resources
 	CD3DX12_RESOURCE_BARRIER postDraw[] = {

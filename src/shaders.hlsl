@@ -44,7 +44,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     float diff = max(dot(norm, lightDir), 0.0);
     float3 result = diff * input.color.xyz;
 
-    return float4(result.x, result.y, result.z, 1.0);
+    //return float4(result.x, result.y, result.z, 1.0);
 
     return float4(1.0, 0.0, 0.0, 1.0);
 }
