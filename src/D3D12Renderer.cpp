@@ -464,8 +464,9 @@ void D3D12Renderer::CreateBuffers()
 		m_particleSystem.m_instancer.m_instanceBufferView.SizeInBytes = instanceBufferSize;
 	}
 
+	// create the vertex buffer
 	{
-		const UINT maxMCVerts = m_particleSystem.MC_MAX_TRIS * 3; // tune to your MC grid
+		const UINT maxMCVerts = m_particleSystem.MC_MAX_TRIS * 3;
 		m_mcMaxVertices = maxMCVerts;
 		const UINT bufferSize = maxMCVerts * sizeof(Vertex);
 

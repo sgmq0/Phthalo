@@ -16,6 +16,13 @@ struct GPUParticle {
     float _pad4;
 };
 
+struct Vertex {
+    float x;
+    float y; 
+    float z; 
+    float w;
+};
+
 cbuffer NSConstants : register(b0) {
     float3 gridOrigin;  // bottom right of the bounding box
     float cellSize;     // size of each of the boxes, this is the same as H
@@ -48,7 +55,7 @@ RWStructuredBuffer<uint> statusBuf              : register(u4); // buffer for pr
 RWStructuredBuffer<GPUParticle> particlesOut    : register(u5);
 
 RWStructuredBuffer<int> mcScalarField         : register(u6);
-RWStructuredBuffer<float4> mcVertexBuffer       : register(u7);  // xyz + pad
+RWStructuredBuffer<Vertex> mcVertexBuffer       : register(u7); // needs to match Vertex in stdafx.h
 RWStructuredBuffer<uint> mcArgs                 : register(u8); 
 // RWStructuredBuffer<uint> mcVertexCounter        : register(u9);
 
@@ -921,9 +928,13 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
         if (slot + 2 < (uint)mcMaxTris * 3) {
             
             // encode normal later
-            mcVertexBuffer[slot] = float4(v0, 1.0f);
-            mcVertexBuffer[slot+1] = float4(v1, 1.0f);
-            mcVertexBuffer[slot+2] = float4(v2, 1.0f);
+            Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f};
+            Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f};
+            Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f};
+
+            mcVertexBuffer[slot] = v0_vert;
+            mcVertexBuffer[slot+1] = v1_vert;
+            mcVertexBuffer[slot+2] = v2_vert;
         }
     }
 }

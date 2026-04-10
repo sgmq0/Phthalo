@@ -157,7 +157,7 @@ void ParticleSystem::CreateComputePipeline(
     m_nsParticlesOut = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
 
     m_mcScalarField = MakeBufferHelper((MC_DIM_X+1) * (MC_DIM_Y+1) * (MC_DIM_Z+1) * sizeof(float), device);
-    m_mcVertexBuffer = MakeBufferHelper(MC_MAX_TRIS * 3 * sizeof(XMFLOAT4), device);
+    m_mcVertexBuffer = MakeBufferHelper(MC_MAX_TRIS * 3 * sizeof(Vertex), device);
     m_mcIndirectArgs = MakeBufferHelper(sizeof(int), device);   // TODO: change this later
     // m_mcVertexCounter;
 
