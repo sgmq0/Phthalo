@@ -21,6 +21,7 @@ struct Vertex {
     float y; 
     float z; 
     float w;
+    float4 normal;
 };
 
 cbuffer NSConstants : register(b0) {
@@ -940,9 +941,9 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
         if (slot + 2 < (uint)mcMaxTris * 3) {
             
             // encode normal later
-            Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f};
-            Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f};
-            Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f};
+            Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f, float4(norm, 1.0f)};
+            Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f, float4(norm, 1.0f)};
+            Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f, float4(norm, 1.0f)};
 
             mcVertexBuffer[slot] = v0_vert;
             mcVertexBuffer[slot+1] = v1_vert;

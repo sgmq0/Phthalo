@@ -30,6 +30,7 @@ struct InstanceData {
 struct Vertex
 {
     float x, y, z, w;
+    XMFLOAT4 normal;
 };
 
 struct Particle {
