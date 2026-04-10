@@ -126,4 +126,7 @@ private:
     ComPtr<ID3D12PipelineState> m_psoClearField;
     ComPtr<ID3D12PipelineState> m_psoBuildField;
     ComPtr<ID3D12PipelineState> m_psoMarchingCubes;
+
+    // resources for sdf generation
+    ComPtr<ID3D12Resource> m_nsSDFVolume;
 };

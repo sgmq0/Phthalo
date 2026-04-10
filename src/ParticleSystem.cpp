@@ -77,7 +77,7 @@ void ParticleSystem::CreateComputePipeline(
 {
     // 1. root signature
 
-    CD3DX12_ROOT_PARAMETER params[11];
+    CD3DX12_ROOT_PARAMETER params[12];
     params[0].InitAsConstantBufferView(0);  // b0: NSConstants
     params[1].InitAsConstantBufferView(1);  // b1: MCConstants
 
@@ -93,10 +93,10 @@ void ParticleSystem::CreateComputePipeline(
     params[8].InitAsUnorderedAccessView(6); // u6: mcScalarField
     params[9].InitAsUnorderedAccessView(7); // u7: mcVertexBuffer
     params[10].InitAsUnorderedAccessView(8); // u8: mcArgs
-    // params[10].InitAsUnorderedAccessView(9); // u9: mcVertexCounter
+    params[11].InitAsUnorderedAccessView(9); // u10: sdfVolume
 
     CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
-    rootDesc.NumParameters = 11;
+    rootDesc.NumParameters = 12;
     rootDesc.pParameters = params;
     rootDesc.NumStaticSamplers = 0;
     rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
@@ -156,10 +156,13 @@ void ParticleSystem::CreateComputePipeline(
     m_nsStatusBuf = MakeBufferHelper(numGroups * sizeof(int), device);
     m_nsParticlesOut = MakeBufferHelper(NUM_PARTICLES * sizeof(GPUParticle), device);
 
+    // marching cubes
     m_mcScalarField = MakeBufferHelper((MC_DIM_X+1) * (MC_DIM_Y+1) * (MC_DIM_Z+1) * sizeof(float), device);
     m_mcVertexBuffer = MakeBufferHelper(MC_MAX_TRIS * 3 * sizeof(Vertex), device);
     m_mcIndirectArgs = MakeBufferHelper(sizeof(int), device);   // TODO: change this later
-    // m_mcVertexCounter;
+
+    // sdf 
+    m_nsSDFVolume = MakeBufferHelper(NS_NUM_CELLS * sizeof(float), device);
 
     // upload buffer, which CPU writes to, then CopyResource to m_nsParticlesIn
     {
@@ -385,7 +388,9 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
     cmdList->SetComputeRootUnorderedAccessView(8, m_mcScalarField->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(9, m_mcVertexBuffer->GetGPUVirtualAddress());
     cmdList->SetComputeRootUnorderedAccessView(10, m_mcIndirectArgs->GetGPUVirtualAddress());
-    // cmdList->SetComputeRootUnorderedAccessView(10, m_mcVertexCounter->GetGPUVirtualAddress());
+
+    // params for sdf
+    cmdList->SetComputeRootUnorderedAccessView(11, m_nsSDFVolume->GetGPUVirtualAddress());
 }
 
 void ParticleSystem::DispatchPrediction(ID3D12GraphicsCommandList *cmdList, float dt) 

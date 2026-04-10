@@ -57,7 +57,7 @@ RWStructuredBuffer<GPUParticle> particlesOut    : register(u5);
 RWStructuredBuffer<int> mcScalarField         : register(u6);
 RWStructuredBuffer<Vertex> mcVertexBuffer       : register(u7); // needs to match Vertex in stdafx.h
 RWStructuredBuffer<uint> mcArgs                 : register(u8); 
-// RWStructuredBuffer<uint> mcVertexCounter        : register(u9);
+RWStructuredBuffer<float> sdfVolume        : register(u9);
 
 // values for uniform grid search
 #define STATUS_SHIFT 30
@@ -65,6 +65,9 @@ RWStructuredBuffer<uint> mcArgs                 : register(u8);
 #define TILE 256
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
+
+static const float SDF_RADIUS = 1.5f;
+static const float PARTICLE_R = 0.5f;
 
 float Poly6(float3 r, float h)
 {
@@ -96,6 +99,15 @@ float3 SpikyGradient(float3 r, float h)
 
     float scalar = -(45.0f / (3.14159265f * h6)) * diff2 / norm;
     return r * scalar;
+}
+
+// Zhu-Bridson 6th order smooth kernel
+float ZBKernel(float r, float h)
+{
+    if (r >= h) return 0.0f;
+    float t = r / h;
+    float x = 1.0f - t * t;
+    return x * x * x;
 }
 
 // ----------------- UNIFORM GRID SEARCH KERNELS --------------------
