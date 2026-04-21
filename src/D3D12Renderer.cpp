@@ -278,6 +278,7 @@ void D3D12Renderer::CreateGraphicsPipeline()
 	UINT compileFlags = 0;
 #endif
 
+#if MARCHING_CUBES
 	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr));
 	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"shaders.hlsl").c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr));
 
@@ -288,6 +289,25 @@ void D3D12Renderer::CreateGraphicsPipeline()
 		{ "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 16, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 	};
+#else
+	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"instance_shaders.hlsl").c_str(), nullptr, nullptr, "VSMain", "vs_5_0", compileFlags, 0, &vertexShader, nullptr));
+	ThrowIfFailed(D3DCompileFromFile(GetAssetFullPath(L"instance_shaders.hlsl").c_str(), nullptr, nullptr, "PSMain", "ps_5_0", compileFlags, 0, &pixelShader, nullptr));
+
+	// define vertex input layout
+	// needs to be consistent with Vertex struct in SphereMesh.h
+	D3D12_INPUT_ELEMENT_DESC inputElementDescs[] =
+	{
+		{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+
+		// per instance data
+		{ "INSTANCE_TRANSFORM", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 1,  0, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 16, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 2, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 32, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+		{ "INSTANCE_TRANSFORM", 3, DXGI_FORMAT_R32G32B32A32_FLOAT, 1, 48, D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA, 1 },
+	};
+#endif
 
 	// depth stencil buffer
 	D3D12_RESOURCE_DESC depthDesc = {};
@@ -329,10 +349,14 @@ void D3D12Renderer::CreateGraphicsPipeline()
 	psoDesc.pRootSignature = m_rootSignature.Get();
 	psoDesc.VS = CD3DX12_SHADER_BYTECODE(vertexShader.Get());
 	psoDesc.PS = CD3DX12_SHADER_BYTECODE(pixelShader.Get());
-
+	
+#if MARCHING_CUBES
 	D3D12_RASTERIZER_DESC rasterDesc = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 	rasterDesc.CullMode = D3D12_CULL_MODE_NONE;
 	psoDesc.RasterizerState = rasterDesc;
+#else
+	psoDesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+#endif
 
 	psoDesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);				// no transparency by default
 	psoDesc.SampleMask = UINT_MAX;
@@ -524,24 +548,18 @@ void D3D12Renderer::PopulateCommandList()
 	m_commandList->ClearDepthStencilView(dsvHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
 	m_commandList->OMSetRenderTargets(1, &rtvHandle, FALSE, &dsvHandle); // bind render targets
 
-	// indexed draw
-	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	// D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
-	// m_commandList->IASetVertexBuffers(0, 2, views);
-	// m_commandList->IASetIndexBuffer(&m_indexBufferView);
-	// m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
-
-	// marching cube mesh
-	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	// D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
-	// m_commandList->IASetVertexBuffers(0, 2, views);
-	// m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-	// m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
-	// m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
-
+#if MARCHING_CUBES
 	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	m_commandList->IASetVertexBuffers(0, 1, &m_mcVertexBufferView);
 	m_commandList->DrawInstanced(m_mcVertexCount, 1, 0, 0);
+#else
+	// indexed draw
+	m_commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	D3D12_VERTEX_BUFFER_VIEW views[2] = { m_vertexBufferView, m_particleSystem.m_instancer.m_instanceBufferView };
+	m_commandList->IASetVertexBuffers(0, 2, views);
+	m_commandList->IASetIndexBuffer(&m_indexBufferView);
+	m_commandList->DrawIndexedInstanced(m_particleSystem.m_instancer.m_sphereIndexCount, m_particleSystem.NUM_PARTICLES, 0, 0, 0);
+#endif
 
 	// transition back resources
 	CD3DX12_RESOURCE_BARRIER postDraw[] = {

@@ -9,6 +9,8 @@ using namespace DirectX;
 
 using Microsoft::WRL::ComPtr;
 
+#define MARCHING_CUBES true
+
 class D3D12Renderer : public DXApplication {
 public:
 	D3D12Renderer(UINT width, UINT height);
