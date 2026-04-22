@@ -403,11 +403,11 @@ void CSCollisionConstraints(uint3 tid : SV_DispatchThreadID)
 
     GPUParticle pi = particlesIn[i];
 
-    float3 posMin = float3(-10.0f, 0, -10.0f);
-    float3 posMax = float3(10.0f, 40.0f, 10.0f);
-    float3 correctedPosition = clamp(pi.predictedPosition, posMin, posMax);
+    // float3 posMin = float3(-size.x, 0, -size.z);
+    // float3 posMax = float3(size.x, size.y, size.z);
+    // float3 correctedPosition = clamp(pi.predictedPosition, posMin, posMax);
     
-    particlesIn[i].predictedPosition = correctedPosition;
+    // particlesIn[i].predictedPosition = correctedPosition;
     particlesIn[i].predictedPosition += pi.delta;
 }
 

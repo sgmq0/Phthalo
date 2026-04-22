@@ -34,7 +34,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 
 # shader compilation
 # Copy shader file to build directory so D3DCompileFromFile can find it
-file(GLOB HLSL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.hlsl")
+file(GLOB HLSL_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/*.hlsl")
 
 foreach(HLSL_FILE ${HLSL_FILES})
     get_filename_component(HLSL_NAME ${HLSL_FILE} NAME)
