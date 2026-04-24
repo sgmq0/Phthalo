@@ -13,7 +13,7 @@ void ParticleSystem::LoadParticles()
     m_particles.resize(NUM_PARTICLES);
     m_instancer.m_instances.resize(NUM_PARTICLES);
 
-    XMFLOAT3 offset = {0.0f, 2.0f, 3.0f};
+    XMFLOAT3 offset = {0.0f, 2.0f, 4.0f};
 
     int i = 0;
     for (int x = 0; x < NUM_X; x++)
@@ -77,36 +77,37 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3D12CommandAllocator> &commandAllocator,
     ComPtr<ID3D12GraphicsCommandList> &commandList)
 {
-    // 1. root signature
+    // 1. root signature for shaders.hlsl
+    {
+        CD3DX12_ROOT_PARAMETER params[12];
+        params[0].InitAsConstantBufferView(0);  // b0: NSConstants
+        params[1].InitAsConstantBufferView(1);  // b1: MCConstants
 
-    CD3DX12_ROOT_PARAMETER params[12];
-    params[0].InitAsConstantBufferView(0);  // b0: NSConstants
-    params[1].InitAsConstantBufferView(1);  // b1: MCConstants
+        // params for pbf
+        params[2].InitAsUnorderedAccessView(0); // u0: cellCount
+        params[3].InitAsUnorderedAccessView(1); // u1: intraOffset
+        params[4].InitAsUnorderedAccessView(2); // u2: particlesIn
+        params[5].InitAsUnorderedAccessView(3); // u3: cellStart
+        params[6].InitAsUnorderedAccessView(4); // u4: groupSums
+        params[7].InitAsUnorderedAccessView(5); // u5: particlesOut
 
-    // params for pbf
-    params[2].InitAsUnorderedAccessView(0); // u0: cellCount
-    params[3].InitAsUnorderedAccessView(1); // u1: intraOffset
-    params[4].InitAsUnorderedAccessView(2); // u2: particlesIn
-    params[5].InitAsUnorderedAccessView(3); // u3: cellStart
-    params[6].InitAsUnorderedAccessView(4); // u4: groupSums
-    params[7].InitAsUnorderedAccessView(5); // u5: particlesOut
+        // params for marching cubes
+        params[8].InitAsUnorderedAccessView(6); // u6: mcScalarField
+        params[9].InitAsUnorderedAccessView(7); // u7: mcVertexBuffer
+        params[10].InitAsUnorderedAccessView(8); // u8: mcArgs
+        params[11].InitAsUnorderedAccessView(9); // u9: sdfVolume
 
-    // params for marching cubes
-    params[8].InitAsUnorderedAccessView(6); // u6: mcScalarField
-    params[9].InitAsUnorderedAccessView(7); // u7: mcVertexBuffer
-    params[10].InitAsUnorderedAccessView(8); // u8: mcArgs
-    params[11].InitAsUnorderedAccessView(9); // u10: sdfVolume
+        CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
+        rootDesc.NumParameters = 12;
+        rootDesc.pParameters = params;
+        rootDesc.NumStaticSamplers = 0;
+        rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
 
-    CD3DX12_ROOT_SIGNATURE_DESC rootDesc = {};
-    rootDesc.NumParameters = 12;
-    rootDesc.pParameters = params;
-    rootDesc.NumStaticSamplers = 0;
-    rootDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
-
-    ComPtr<ID3DBlob> sig, err;
-    ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
-    ThrowIfFailed(device->CreateRootSignature(0, sig->GetBufferPointer(),
-        sig->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)));
+        ComPtr<ID3DBlob> sig, err;
+        ThrowIfFailed(D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &sig, &err));
+        ThrowIfFailed(device->CreateRootSignature(0, sig->GetBufferPointer(),
+            sig->GetBufferSize(), IID_PPV_ARGS(&m_computeRootSignature)));
+    }
 
     // 2/3. compile shaders & pipeline states
 
@@ -129,7 +130,6 @@ void ParticleSystem::CreateComputePipeline(
     ComPtr<ID3DBlob> collisionConstraints = CompileHelper(shaderPath, "CSCollisionConstraints");
     ComPtr<ID3DBlob> updateVelocity = CompileHelper(shaderPath, "CSUpdateVelocity");
     ComPtr<ID3DBlob> computeXSPH = CompileHelper(shaderPath, "CSComputeXSPH");
-    ComPtr<ID3DBlob> finalize = CompileHelper(shaderPath, "CSFinalize");
 
     m_psoPrediction = MakePSOHelper(prediction.Get(), m_computeRootSignature.Get(), device);
     m_psoComputeLambda = MakePSOHelper(computeLambda.Get(), m_computeRootSignature.Get(), device);
@@ -137,13 +137,12 @@ void ParticleSystem::CreateComputePipeline(
     m_psoCollisionConstraints = MakePSOHelper(collisionConstraints.Get(), m_computeRootSignature.Get(), device);
     m_psoUpdateVelocity = MakePSOHelper(updateVelocity.Get(), m_computeRootSignature.Get(), device);
     m_psoComputeXSPH = MakePSOHelper(computeXSPH.Get(), m_computeRootSignature.Get(), device);
-    m_psoComputeFinalize = MakePSOHelper(finalize.Get(), m_computeRootSignature.Get(), device);
 
     // ----- marching cubes kernels ----- 
-    ComPtr<ID3DBlob> clearArgs = CompileHelper(shaderPath, "CSClearArgs");
-    ComPtr<ID3DBlob> clearField = CompileHelper(shaderPath, "CSClearField");
-    ComPtr<ID3DBlob> buildScalarField = CompileHelper(shaderPath, "CSBuildScalarField");
-    ComPtr<ID3DBlob> marchingCubes = CompileHelper(shaderPath, "CSMarchingCubes");
+    ComPtr<ID3DBlob> clearArgs = CompileHelper(mcShaderPath, "CSClearArgs");
+    ComPtr<ID3DBlob> clearField = CompileHelper(mcShaderPath, "CSClearField");
+    ComPtr<ID3DBlob> buildScalarField = CompileHelper(mcShaderPath, "CSBuildScalarField");
+    ComPtr<ID3DBlob> marchingCubes = CompileHelper(mcShaderPath, "CSMarchingCubes");
     m_psoClearArgs = MakePSOHelper(clearArgs.Get(), m_computeRootSignature.Get(), device);
     m_psoClearField = MakePSOHelper(clearField.Get(), m_computeRootSignature.Get(), device);
     m_psoBuildField = MakePSOHelper(buildScalarField.Get(), m_computeRootSignature.Get(), device);
@@ -276,37 +275,6 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
     cmdList->ResourceBarrier(1, &b3);
 
     // insert kernel to update position
-}
-
-void ParticleSystem::DispatchMarchingCubes(ID3D12GraphicsCommandList *cmdList)
-{
-
-    // 0: clear args
-    cmdList->SetPipelineState(m_psoClearArgs.Get());
-    cmdList->Dispatch(1, 1, 1);
-    auto b0 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcIndirectArgs.Get());
-    cmdList->ResourceBarrier(1, &b0);
-
-    // 1: clear scalar field
-    UINT fieldVerts = (MC_DIM_X+1)*(MC_DIM_Y+1)*(MC_DIM_Z+1);
-    cmdList->SetPipelineState(m_psoClearField.Get());
-    cmdList->Dispatch((fieldVerts + 63) / 64, 1, 1);
-    auto b1 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcScalarField.Get());
-    cmdList->ResourceBarrier(1, &b1);
-
-    // 2. splat particles
-    cmdList->SetPipelineState(m_psoBuildField.Get());
-    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcScalarField.Get());
-    cmdList->ResourceBarrier(1, &b2);
-
-    // 3. perform marching cubes
-    UINT numCells = MC_DIM_X * MC_DIM_Y * MC_DIM_Z;
-    cmdList->SetPipelineState(m_psoMarchingCubes.Get());
-    cmdList->Dispatch((numCells + 63) / 64, 1, 1);
-    auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcVertexBuffer.Get());
-    cmdList->ResourceBarrier(1, &b3);
-
 }
 
 void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
@@ -478,6 +446,36 @@ void ParticleSystem::DispatchNeighborSearch(ID3D12GraphicsCommandList *cmdList)
     cmdList->ResourceBarrier(1, &reorderBarrier);
 }
 
+void ParticleSystem::DispatchMarchingCubes(ID3D12GraphicsCommandList *cmdList)
+{
+    // 0: clear args
+    cmdList->SetPipelineState(m_psoClearArgs.Get());
+    cmdList->Dispatch(1, 1, 1);
+    auto b0 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcIndirectArgs.Get());
+    cmdList->ResourceBarrier(1, &b0);
+
+    // 1: clear scalar field
+    UINT fieldVerts = (MC_DIM_X+1)*(MC_DIM_Y+1)*(MC_DIM_Z+1);
+    cmdList->SetPipelineState(m_psoClearField.Get());
+    cmdList->Dispatch((fieldVerts + 63) / 64, 1, 1);
+    auto b1 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcScalarField.Get());
+    cmdList->ResourceBarrier(1, &b1);
+
+    // 2. splat particles
+    cmdList->SetPipelineState(m_psoBuildField.Get());
+    cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
+    auto b2 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcScalarField.Get());
+    cmdList->ResourceBarrier(1, &b2);
+
+    // 3. perform marching cubes
+    UINT numCells = MC_DIM_X * MC_DIM_Y * MC_DIM_Z;
+    cmdList->SetPipelineState(m_psoMarchingCubes.Get());
+    cmdList->Dispatch((numCells + 63) / 64, 1, 1);
+    auto b3 = CD3DX12_RESOURCE_BARRIER::UAV(m_mcVertexBuffer.Get());
+    cmdList->ResourceBarrier(1, &b3);
+
+}
+
 ComPtr<ID3D12PipelineState> ParticleSystem::GetPsoClear()
 {
     return m_psoClear;
@@ -541,8 +539,6 @@ void ParticleSystem::ReadbackVertexData(ID3D12GraphicsCommandList *cmdList)
     m_mcReadbackArgs->Map(0, nullptr, (void**)&args);
     uint32_t vertexCount = args[0];
     m_mcReadbackArgs->Unmap(0, nullptr);
-
-    //printf("Vertex count: %u\n", vertexCount);
 
     if (m_vertices.size() < vertexCount)
         m_vertices.resize(vertexCount);

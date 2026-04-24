@@ -44,7 +44,6 @@ void D3D12Renderer::OnUpdate()
 
 	// write per instance data
 	// change this into particles...
-
 	ThrowIfFailed(m_computeAllocator->Reset());
 	ThrowIfFailed(m_computeCommandList->Reset(
 		m_computeAllocator.Get(), m_particleSystem.GetPsoClear().Get()));
@@ -83,7 +82,7 @@ void D3D12Renderer::OnUpdate()
 	}
 	m_mcVertexCount = vertCount;
 
-	printf("Vertex count: %u\n", vertCount);
+	// printf("Vertex count: %u\n", vertCount);
 
 	static float fpsTimer = 0.0f;
 	fpsTimer += dt;

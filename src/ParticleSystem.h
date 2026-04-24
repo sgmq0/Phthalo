@@ -29,10 +29,12 @@ public:
 
     // compute dispatches
     void DispatchGPUCommands(ID3D12GraphicsCommandList* cmdList, float dt);
-    void DispatchMarchingCubes(ID3D12GraphicsCommandList* cmdList);
     void DispatchInit(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchPrediction(ID3D12GraphicsCommandList* cmdList, float dt);
     void DispatchNeighborSearch(ID3D12GraphicsCommandList* cmdList);
+
+    void DispatchMarchingCubes(ID3D12GraphicsCommandList* cmdList);
+    void DispatchMCInit(ID3D12GraphicsCommandList* cmdList);
 
     // various getters for private variables
     ComPtr<ID3D12PipelineState> GetPsoClear();
@@ -46,8 +48,8 @@ public:
     std::vector<Vertex> m_vertices;
 
     // --------- CONSTANTS --------
-    static const UINT NUM_X = 50;
-    static const UINT NUM_Y = 50;
+    static const UINT NUM_X = 60;
+    static const UINT NUM_Y = 60;
     static const UINT NUM_Z = 20;
     static const UINT NUM_PARTICLES = NUM_X * NUM_Y * NUM_Z;
     const float PARTICLE_SIZE = 0.1f;
@@ -62,8 +64,8 @@ public:
 
     // consts we use in finalization step
     const float DAMPING = 0.999f;
-    const float VISCOSITY = 0.1f;
-    const int ITERATIONS = 2;
+    const float VISCOSITY = 0.05f;
+    const int ITERATIONS = 4;
 
     // uniform grid search consts
     const UINT NS_DIM_X = (UINT)ceil((BBOX_SIZE_XZ * 2) / CELL_SIZE) + 2;
@@ -118,7 +120,6 @@ private:
     ComPtr<ID3D12PipelineState> m_psoCollisionConstraints;
     ComPtr<ID3D12PipelineState> m_psoUpdateVelocity;    // TODO: make this work lol
     ComPtr<ID3D12PipelineState> m_psoComputeXSPH;
-    ComPtr<ID3D12PipelineState> m_psoComputeFinalize;   // TODO: make this work lol
 
     // all of the resources for marching cubes
     ComPtr<ID3D12Resource> m_mcScalarField;       // float per grid vertex
