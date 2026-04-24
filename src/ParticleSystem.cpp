@@ -210,7 +210,7 @@ void ParticleSystem::CreateComputePipeline(
 
     {
         CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_READBACK);
-        auto desc = CD3DX12_RESOURCE_DESC::Buffer(MC_MAX_TRIS * 3 * sizeof(XMFLOAT4));
+        auto desc = CD3DX12_RESOURCE_DESC::Buffer(MC_MAX_TRIS * 3 * sizeof(Vertex));
         ThrowIfFailed(device->CreateCommittedResource(
             &heap, D3D12_HEAP_FLAG_NONE, &desc,
             D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
@@ -542,7 +542,7 @@ void ParticleSystem::ReadbackVertexData(ID3D12GraphicsCommandList *cmdList)
     uint32_t vertexCount = args[0];
     m_mcReadbackArgs->Unmap(0, nullptr);
 
-    printf("Vertex count: %u\n", vertexCount);
+    //printf("Vertex count: %u\n", vertexCount);
 
     if (m_vertices.size() < vertexCount)
         m_vertices.resize(vertexCount);
