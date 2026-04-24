@@ -67,8 +67,8 @@ RWStructuredBuffer<float> sdfVolume        : register(u9);
 groupshared int gs[TILE];
 groupshared int gs_exclusivePrefix;
 
-static const float SDF_RADIUS = 1.5f;
-static const float PARTICLE_R = 0.5f;
+#define MU_S 0.1f
+#define MU_K 0.05f
 
 float Poly6(float3 r, float h)
 {
@@ -321,10 +321,8 @@ void CSComputeLambda(uint3 tid : SV_DispatchThreadID)
             gradSum += SpikyGradient(pos_i - pos_j, H);
         }
     }
-
+    
     float numerator = (density / RHO_0) - 1.0f;
-
-    // factor self term into denominator
     float3 gradSumFinalized = gradSum / RHO_0;
     denominator += dot(gradSumFinalized, gradSumFinalized);
     denominator += EPSILON;
@@ -402,13 +400,18 @@ void CSCollisionConstraints(uint3 tid : SV_DispatchThreadID)
     if (i >= numParticles) return;
 
     GPUParticle pi = particlesIn[i];
+    int oi = pi.originalIndex;
 
-    // float3 posMin = float3(-size.x, 0, -size.z);
-    // float3 posMax = float3(size.x, size.y, size.z);
-    // float3 correctedPosition = clamp(pi.predictedPosition, posMin, posMax);
-    
-    // particlesIn[i].predictedPosition = correctedPosition;
-    particlesIn[i].predictedPosition += pi.delta;
+    float particleRadius = 0.15f;
+    float3 posMin = float3(-size.x + particleRadius, particleRadius, -size.z + particleRadius);
+    float3 posMax = float3(size.x - particleRadius, size.y - particleRadius, size.z - particleRadius);
+
+    float3 oldPos = particlesIn[oi].predictedPosition;
+    float3 newPos = oldPos + particlesIn[oi].delta;
+    newPos = clamp(newPos, posMin, posMax);
+
+    particlesIn[oi].predictedPosition = newPos;
+    //particlesIn[oi].delta = float3(0, 0, 0);
 }
 
 [numthreads(64, 1, 1)]

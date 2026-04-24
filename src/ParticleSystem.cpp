@@ -11,29 +11,31 @@ ParticleSystem::ParticleSystem()
 void ParticleSystem::LoadParticles()
 {
     m_particles.resize(NUM_PARTICLES);
+    m_instancer.m_instances.resize(NUM_PARTICLES);
 
-	// initializes all the particles
-    int perAxis = (int)cbrt(NUM_PARTICLES);
+    XMFLOAT3 offset = {0.0f, 2.0f, 3.0f};
+
     int i = 0;
-    for (int x = 0; x < perAxis; x++)
-    for (int y = 0; y < perAxis; y++)
-    for (int z = 0; z < perAxis; z++) {
-        if (i >= NUM_PARTICLES) break;
+    for (int x = 0; x < NUM_X; x++)
+    for (int y = 0; y < NUM_Y; y++)
+    for (int z = 0; z < NUM_Z; z++)
+    {
+        float particleRadius = 0.15f;
 
         m_particles[i].position = {
-            (x - perAxis/2.0f) * PARTICLE_SPACING,
-            y * PARTICLE_SPACING + 1.0f,   // start above floor
-            (z - perAxis/2.0f) * PARTICLE_SPACING
+            (x - NUM_X / 2.0f) * PARTICLE_SPACING + offset.x,
+            y * PARTICLE_SPACING + offset.y,
+            (z - NUM_Z / 2.0f) * PARTICLE_SPACING + offset.z,
         };
-        m_particles[i].velocity = {0, 0, 0};
-        m_particles[i].predictedPosition = m_particles[i].position; 
+
+        m_particles[i].velocity = { 0, 0, 0 };
+        m_particles[i].predictedPosition = m_particles[i].position;
         m_particles[i].density = 0.0f;
         m_particles[i].lambda = 0.0f;
-        m_particles[i].xsph = {0.0, 0.0, 0.0};
+        m_particles[i].delta = { 0, 0, 0 };
+        m_particles[i].xsph = { 0, 0, 0 };
         i++;
     }
-    
-    m_instancer.m_instances.resize(NUM_PARTICLES);
 }
 
 ComPtr<ID3DBlob> CompileHelper(std::wstring shaderPath, const char* entry) 
@@ -267,12 +269,6 @@ void ParticleSystem::DispatchGPUCommands(ID3D12GraphicsCommandList *cmdList, flo
         cmdList->ResourceBarrier(1, &b4);
     }
 
-    // insert kernel to update velocity
-    // cmdList->SetPipelineState(m_psoUpdateVelocity.Get());
-    // cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
-    // auto b5 = CD3DX12_RESOURCE_BARRIER::UAV(m_nsParticlesIn.Get());
-    // cmdList->ResourceBarrier(1, &b5);
-
     // xsph
     cmdList->SetPipelineState(m_psoComputeXSPH.Get());
     cmdList->Dispatch((NUM_PARTICLES + 63) / 64, 1, 1);
@@ -332,7 +328,7 @@ void ParticleSystem::DispatchInit(ID3D12GraphicsCommandList *cmdList, float dt)
         float _pad1[3];
     };
     NSConstants cb;
-    cb.gridOrigin = XMFLOAT3(-BBOX_SIZE_XZ - CELL_SIZE, - CELL_SIZE, -BBOX_SIZE_XZ - CELL_SIZE);
+    cb.gridOrigin = XMFLOAT3(-(NS_DIM_X * CELL_SIZE) / 2.0f, -CELL_SIZE, -(NS_DIM_Z * CELL_SIZE) / 2.0f);
     cb.cellSize = CELL_SIZE;
     cb.gridDimX = NS_DIM_X;
     cb.gridDimY = NS_DIM_Y;

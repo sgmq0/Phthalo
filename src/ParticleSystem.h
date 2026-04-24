@@ -46,12 +46,15 @@ public:
     std::vector<Vertex> m_vertices;
 
     // --------- CONSTANTS --------
-    static const UINT NUM_PARTICLES = 100000;
+    static const UINT NUM_X = 50;
+    static const UINT NUM_Y = 50;
+    static const UINT NUM_Z = 20;
+    static const UINT NUM_PARTICLES = NUM_X * NUM_Y * NUM_Z;
     const float PARTICLE_SIZE = 0.1f;
     const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
 
     // simulation consts
-    const float BBOX_SIZE_XZ = 20.0f;
+    const float BBOX_SIZE_XZ = 10.0f;
     const float BBOX_SIZE_Y = 100.0f;
     const float CELL_SIZE = 1.0f;
     const float RHO_0 = 40.0f;          // rest density
