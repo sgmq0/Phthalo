@@ -117,9 +117,6 @@ private:
     ComPtr<ID3D12Resource> m_constantBuffer;
     UINT8* m_pCbvDataBegin = nullptr;  // persistent mapped pointer
 
-    struct VPConstantBuffer {
-        XMFLOAT4X4 vp;
-    };
     VPConstantBuffer m_cbData;
 
     Camera m_camera;

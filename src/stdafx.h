@@ -80,3 +80,10 @@ struct MCConstants {
     int mcMaxTris;
     float _pad[3];
 };
+
+struct VPConstantBuffer {
+    XMFLOAT4X4 vp;
+    // XMFLOAT3 camPos;
+    // float _pad;
+};
+

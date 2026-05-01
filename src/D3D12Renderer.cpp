@@ -40,7 +40,11 @@ void D3D12Renderer::OnUpdate()
 	
     XMMATRIX vp   = XMMatrixTranspose(view * proj);
     XMStoreFloat4x4(&m_cbData.vp, vp);
-    memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
+
+	// XMVECTOR v = XMLoadFloat3(&m_camera.GetCameraPos());
+	// XMStoreFloat3(&m_cbData.camPos, v);
+    
+	memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
 
 	// write per instance data
 	// change this into particles...

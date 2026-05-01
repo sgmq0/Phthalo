@@ -19,6 +19,9 @@ public:
 
     XMMATRIX GetViewMatrix() const;
     XMMATRIX GetProjectionMatrix(float aspectRatio) const;
+    XMFLOAT3 GetCameraPos() {
+        return m_position;
+    }
 
 private:
     void updateCameraVectors();
