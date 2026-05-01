@@ -422,6 +422,23 @@ void CSBuildScalarField(uint3 tid : SV_DispatchThreadID)
     }
 }
 
+float SampleField(int3 v)
+{
+    // clamp to grid bounds
+    v = clamp(v, int3(0,0,0), mcDim);
+    int fi = v.x + v.y*(mcDim.x+1) + v.z*(mcDim.x+1)*(mcDim.y+1);
+    return mcScalarField[fi] / 100.0f;
+}
+
+float3 ScalarFieldGradient(int3 v)
+{
+    // central differences on the scalar field
+    float dx = SampleField(v + int3(1,0,0)) - SampleField(v - int3(1,0,0));
+    float dy = SampleField(v + int3(0,1,0)) - SampleField(v - int3(0,1,0));
+    float dz = SampleField(v + int3(0,0,1)) - SampleField(v - int3(0,0,1));
+    return normalize(float3(dx, dy, dz));
+}
+
 [numthreads(64, 1, 1)]
 void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
 {
@@ -462,9 +479,15 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
         worldCorners[i3] = mcOrigin + float3(corners[i3]) * mcCellSize;
 
     float3 edgeVerts[12];
+    float3 edgeNormals[12];
     #define LERP_EDGE(e, a, b) \
-        edgeVerts[e] = lerp(worldCorners[a], worldCorners[b], \
-            (mcIso - val[a]) / (val[b] - val[a] + 1e-9f));
+    { \
+        float t = (mcIso - val[a]) / (val[b] - val[a] + 1e-9f); \
+        edgeVerts[e] = lerp(worldCorners[a], worldCorners[b], t); \
+        edgeNormals[e] = normalize(lerp( \
+            ScalarFieldGradient(corners[a]), \
+            ScalarFieldGradient(corners[b]), t)); \
+    }
 
     if (edgeTable[cubeIdx] & 0x001) LERP_EDGE(0,  0, 1)
     if (edgeTable[cubeIdx] & 0x002) LERP_EDGE(1,  1, 2)
@@ -482,21 +505,24 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
     // emit triangles
     for (int t = 0; triTable[cubeIdx][t] != -1; t += 3)
     {
-        float3 v0 = edgeVerts[triTable[cubeIdx][t  ]];
+        float3 v0 = edgeVerts[triTable[cubeIdx][t]];
         float3 v1 = edgeVerts[triTable[cubeIdx][t+1]];
         float3 v2 = edgeVerts[triTable[cubeIdx][t+2]];
 
+        float3 n0 = edgeNormals[triTable[cubeIdx][t]];
+        float3 n1 = edgeNormals[triTable[cubeIdx][t+1]];
+        float3 n2 = edgeNormals[triTable[cubeIdx][t+2]];
+
         // compute flat normal
-        float3 norm = normalize(cross(v1-v0, v2-v0));
 
         uint slot;
         InterlockedAdd(mcArgs[0], 3u, slot);
 
         if (slot + 3 > (uint)mcMaxTris * 3) return; 
         
-        Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f, float4(norm, 1.0f)};
-        Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f, float4(norm, 1.0f)};
-        Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f, float4(norm, 1.0f)};
+        Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f, float4(n0, 1.0f)};
+        Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f, float4(n1, 1.0f)};
+        Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f, float4(n2, 1.0f)};
 
         mcVertexBuffer[slot] = v0_vert;
         mcVertexBuffer[slot+1] = v1_vert;
