@@ -410,6 +410,15 @@ void CSBuildScalarField(uint3 tid : SV_DispatchThreadID)
 
         int idx = gv.x + gv.y*(mcDim.x+1) + gv.z*(mcDim.x+1)*(mcDim.y+1);
         InterlockedAdd(mcScalarField[idx], w);
+
+        bool onBoundary = (gv.x <= 0 || gv.x >= mcDim.x - 1 ||
+                           gv.y <= 0 ||
+                           gv.z <= 0 || gv.z >= mcDim.z - 1);
+        if (onBoundary)
+        {
+            int boundaryBoost = (int)(mcIso * 100.0f) + 1;
+            InterlockedMin(mcScalarField[idx], -100);
+        }
     }
 }
 

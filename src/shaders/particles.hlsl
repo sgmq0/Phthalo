@@ -259,7 +259,7 @@ void CSPrediction(uint3 tid : SV_DispatchThreadID)
 
     // apply forces
     //particlesIn[i].velocity.y += -9.8f * dt;
-    particlesIn[i].velocity.y += -1.0f * dt;
+    particlesIn[i].velocity.y += -3.0f * dt;
 
     // predict position
     particlesIn[i].predictedPosition = particlesIn[i].position + dt * particlesIn[i].velocity;

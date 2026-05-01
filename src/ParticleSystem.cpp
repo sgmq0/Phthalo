@@ -13,8 +13,6 @@ void ParticleSystem::LoadParticles()
     m_particles.resize(NUM_PARTICLES);
     m_instancer.m_instances.resize(NUM_PARTICLES);
 
-    XMFLOAT3 offset = {0.0f, 2.0f, 4.0f};
-
     int i = 0;
     for (int x = 0; x < NUM_X; x++)
     for (int y = 0; y < NUM_Y; y++)
@@ -23,9 +21,9 @@ void ParticleSystem::LoadParticles()
         float particleRadius = 0.15f;
 
         m_particles[i].position = {
-            (x - NUM_X / 2.0f) * PARTICLE_SPACING + offset.x,
-            y * PARTICLE_SPACING + offset.y,
-            (z - NUM_Z / 2.0f) * PARTICLE_SPACING + offset.z,
+            (x - NUM_X / 2.0f) * PARTICLE_SPACING + PARTICLE_OFFSET.x,
+            y * PARTICLE_SPACING + PARTICLE_OFFSET.y,
+            (z - NUM_Z / 2.0f) * PARTICLE_SPACING + PARTICLE_OFFSET.z,
         };
 
         m_particles[i].velocity = { 0, 0, 0 };

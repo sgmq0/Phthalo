@@ -48,12 +48,13 @@ public:
     std::vector<Vertex> m_vertices;
 
     // --------- CONSTANTS --------
-    static const UINT NUM_X = 60;
-    static const UINT NUM_Y = 60;
-    static const UINT NUM_Z = 15;
+    static const UINT NUM_X = 40;
+    static const UINT NUM_Y = 40;
+    static const UINT NUM_Z = 40;
     static const UINT NUM_PARTICLES = NUM_X * NUM_Y * NUM_Z;
     const float PARTICLE_SIZE = 0.1f;
     const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
+    const XMFLOAT3 PARTICLE_OFFSET = {0.0f, 4.0f, 0.0f};    // offsets where the particles spawn 
 
     // simulation consts
     const float BBOX_SIZE_XZ = 10.0f;
@@ -126,6 +127,7 @@ private:
     ComPtr<ID3D12Resource> m_mcVertexBuffer;      // output triangles
     ComPtr<ID3D12Resource> m_mcIndirectArgs;      // DrawInstanced args
     ComPtr<ID3D12Resource> m_mcVertexCounter;     // atomic counter
+
     ComPtr<ID3D12PipelineState> m_psoClearArgs;
     ComPtr<ID3D12PipelineState> m_psoClearField;
     ComPtr<ID3D12PipelineState> m_psoBuildField;

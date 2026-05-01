@@ -31,7 +31,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     float4 water_color = float4(0.3, 0.6, 1.0, 1.0);
     float3 result = diff * water_color;
 
-    return float4(result.x, result.y, result.z, 1.0);
+    return float4(norm, 1.0);
 
     //return float4(0.3, 0.6, 1.0, 1.0);  // flat blue-ish water color
 }
