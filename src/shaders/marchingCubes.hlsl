@@ -513,8 +513,6 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
         float3 n1 = edgeNormals[triTable[cubeIdx][t+1]];
         float3 n2 = edgeNormals[triTable[cubeIdx][t+2]];
 
-        // compute flat normal
-
         uint slot;
         InterlockedAdd(mcArgs[0], 3u, slot);
 

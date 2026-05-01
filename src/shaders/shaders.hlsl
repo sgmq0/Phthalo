@@ -3,6 +3,8 @@
 cbuffer VPBuffer : register(b0)
 {
     float4x4 vp;
+    float3 camPos;
+    float _pad;
 };
 
 struct PSInput
@@ -43,7 +45,7 @@ float4 PSMain(PSInput input) : SV_TARGET
     float3 specular = spec * float3(1.0, 1.0, 1.0) * 0.8;
 
     // fresnel
-    float  fresnel  = pow(1.0 - saturate(dot(N, V)), 4.0);
+    float fresnel = pow(1.0 - saturate(dot(N, V)), 4.0);
     float3 deepWater = float3(0.05, 0.15, 0.4);
     float3 shallowWater = float3(0.3,  0.7,  1.0);
     float3 waterColor = lerp(deepWater, shallowWater, fresnel);

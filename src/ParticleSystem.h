@@ -48,13 +48,13 @@ public:
     std::vector<Vertex> m_vertices;
 
     // --------- CONSTANTS --------
-    static const UINT NUM_X = 40;
-    static const UINT NUM_Y = 40;
-    static const UINT NUM_Z = 40;
+    static const UINT NUM_X = 50;
+    static const UINT NUM_Y = 50;
+    static const UINT NUM_Z = 20;
     static const UINT NUM_PARTICLES = NUM_X * NUM_Y * NUM_Z;
     const float PARTICLE_SIZE = 0.1f;
     const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
-    const XMFLOAT3 PARTICLE_OFFSET = {0.0f, 4.0f, 0.0f};    // offsets where the particles spawn 
+    const XMFLOAT3 PARTICLE_OFFSET = {0.0f, 4.0f, 4.0f};    // offsets where the particles spawn 
 
     // simulation consts
     const float BBOX_SIZE_XZ = 10.0f;
@@ -80,7 +80,7 @@ public:
     const UINT MC_DIM_Z = 64;
     const UINT MC_NUM_CELLS = MC_DIM_X * MC_DIM_Y * MC_DIM_Z;
     const float MC_CELL_SIZE = (BBOX_SIZE_XZ * 2.0f) / MC_DIM_X;
-    const float MC_ISO = 5.0f; //isosurface threshold
+    const float MC_ISO = 4.0f; //isosurface threshold
     const UINT MC_MAX_TRIS = MC_NUM_CELLS * 5;
     
     bool m_nsFirstFrame = true;

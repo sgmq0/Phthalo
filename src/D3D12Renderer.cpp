@@ -41,8 +41,9 @@ void D3D12Renderer::OnUpdate()
     XMMATRIX vp   = XMMatrixTranspose(view * proj);
     XMStoreFloat4x4(&m_cbData.vp, vp);
 
-	// XMVECTOR v = XMLoadFloat3(&m_camera.GetCameraPos());
-	// XMStoreFloat3(&m_cbData.camPos, v);
+	// trying to add camera pos into constant buffer
+	XMVECTOR v = XMLoadFloat3(&m_camera.GetCameraPos());
+	XMStoreFloat3(&m_cbData.camPos, v);
     
 	memcpy(m_pCbvDataBegin, &m_cbData, sizeof(m_cbData));
 

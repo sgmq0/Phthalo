@@ -83,7 +83,7 @@ struct MCConstants {
 
 struct VPConstantBuffer {
     XMFLOAT4X4 vp;
-    // XMFLOAT3 camPos;
-    // float _pad;
+    XMFLOAT3 camPos;
+    float _pad;
 };
 
