@@ -50,7 +50,7 @@ public:
     // --------- CONSTANTS --------
     static const UINT NUM_X = 60;
     static const UINT NUM_Y = 60;
-    static const UINT NUM_Z = 20;
+    static const UINT NUM_Z = 15;
     static const UINT NUM_PARTICLES = NUM_X * NUM_Y * NUM_Z;
     const float PARTICLE_SIZE = 0.1f;
     const float PARTICLE_SPACING = 0.3f;    // how far the particles spawn from each other
@@ -64,8 +64,8 @@ public:
 
     // consts we use in finalization step
     const float DAMPING = 0.999f;
-    const float VISCOSITY = 0.05f;
-    const int ITERATIONS = 4;
+    const float VISCOSITY = 0.1f;
+    const int ITERATIONS = 3;
 
     // uniform grid search consts
     const UINT NS_DIM_X = (UINT)ceil((BBOX_SIZE_XZ * 2) / CELL_SIZE) + 2;
@@ -79,7 +79,7 @@ public:
     const UINT MC_DIM_Z = 64;
     const UINT MC_NUM_CELLS = MC_DIM_X * MC_DIM_Y * MC_DIM_Z;
     const float MC_CELL_SIZE = (BBOX_SIZE_XZ * 2.0f) / MC_DIM_X;
-    const UINT MC_ISO = 20.0f; //isosurface threshold
+    const float MC_ISO = 5.0f; //isosurface threshold
     const UINT MC_MAX_TRIS = MC_NUM_CELLS * 5;
     
     bool m_nsFirstFrame = true;

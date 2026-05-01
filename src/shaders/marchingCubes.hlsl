@@ -55,7 +55,7 @@ RWStructuredBuffer<GPUParticle> particlesOut    : register(u5);
 RWStructuredBuffer<float> sdfVolume             : register(u9);
 
 RWStructuredBuffer<GPUParticle> particlesIn     : register(u2);
-RWStructuredBuffer<int> mcScalarField           : register(u6); // 
+RWStructuredBuffer<int> mcScalarField           : register(u6); // density field 
 RWStructuredBuffer<Vertex> mcVertexBuffer       : register(u7); // output buffer for triangles
 RWStructuredBuffer<uint> mcArgs                 : register(u8); // stores number of vertices
 
@@ -399,19 +399,21 @@ void CSBuildScalarField(uint3 tid : SV_DispatchThreadID)
     for (int dz = -2; dz <= 2; dz++)
     {
         int3 gv = center + int3(dx, dy, dz);
-        if (any(gv < int3(0,0,0)) ||
-            any(gv > mcDim)) continue;   // note: mcDim, not mcDim-1
+        
+        // handle out of bounds
+        // should be mcDim, not mcDim-1
+        if (any(gv < int3(0,0,0)) || any(gv > mcDim)) continue;
 
         float3 gvPos = mcOrigin + float3(gv) * mcCellSize;
         float3 r = pos - gvPos;
-        int w = (int)(Poly6(r, H * 2.0f) * 100.0f);
+        int w = (int)(Poly6(r, H * 2.0f) * 100.0f); // scale the results by 100 since theres no interlocked add w floats
 
         int idx = gv.x + gv.y*(mcDim.x+1) + gv.z*(mcDim.x+1)*(mcDim.y+1);
         InterlockedAdd(mcScalarField[idx], w);
     }
 }
 
-[numthreads(64,1,1)]
+[numthreads(64, 1, 1)]
 void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
 {
     uint cellCount = (uint)(mcDim.x * mcDim.y * mcDim.z);
@@ -480,16 +482,16 @@ void CSMarchingCubes(uint3 tid : SV_DispatchThreadID)
 
         uint slot;
         InterlockedAdd(mcArgs[0], 3u, slot);
-        if (slot + 2 < (uint)mcMaxTris * 3) {
-            
-            // encode normal later
-            Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f, float4(norm, 1.0f)};
-            Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f, float4(norm, 1.0f)};
-            Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f, float4(norm, 1.0f)};
 
-            mcVertexBuffer[slot] = v0_vert;
-            mcVertexBuffer[slot+1] = v1_vert;
-            mcVertexBuffer[slot+2] = v2_vert;
-        }
+        if (slot + 3 > (uint)mcMaxTris * 3) return; 
+        
+        Vertex v0_vert = {v0.x, v0.y, v0.z, 1.0f, float4(norm, 1.0f)};
+        Vertex v1_vert = {v1.x, v1.y, v1.z, 1.0f, float4(norm, 1.0f)};
+        Vertex v2_vert = {v2.x, v2.y, v2.z, 1.0f, float4(norm, 1.0f)};
+
+        mcVertexBuffer[slot] = v0_vert;
+        mcVertexBuffer[slot+1] = v1_vert;
+        mcVertexBuffer[slot+2] = v2_vert;
+
     }
 }

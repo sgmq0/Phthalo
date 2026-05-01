@@ -9,7 +9,7 @@ using namespace DirectX;
 
 using Microsoft::WRL::ComPtr;
 
-#define MARCHING_CUBES false
+#define MARCHING_CUBES true
 
 class D3D12Renderer : public DXApplication {
 public:

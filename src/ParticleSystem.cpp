@@ -540,8 +540,8 @@ void ParticleSystem::ReadbackVertexData(ID3D12GraphicsCommandList *cmdList)
     uint32_t vertexCount = args[0];
     m_mcReadbackArgs->Unmap(0, nullptr);
 
-    if (m_vertices.size() < vertexCount)
-        m_vertices.resize(vertexCount);
+    vertexCount = min(vertexCount, MC_MAX_TRIS * 3);
+    m_vertices.resize(vertexCount);
 
     Vertex* readback = nullptr;
     CD3DX12_RANGE readRange(0, 0);
